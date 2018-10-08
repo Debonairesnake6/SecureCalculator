@@ -75,15 +75,23 @@ def get_champs():
 
 def get_champ_info():
     """
-    Get the start information for each champion
+    Get the stat information for each champion
     :return:
     """
 
-    health = None
-    health_regen = None
-    champ_stats = []
-    champ_list = [[], []]
-    champ_url = []
+    stat_type = ["Health",  # Keep track of each stat
+                 "HealthRegen",
+                 "Range",
+                 "AttackDamage",
+                 "AttackSpeed",
+                 "Armor",
+                 "MagicResist",
+                 "MovementSpeed",
+                 "ResourceBar",
+                 "ResourceRegen"]
+    champ_list = [[], []]  # Champion Names with stats
+    champ_url = []  # Each champion wiki page
+    cnt = 0  # For Debugging
     main_url = get_url('http://leagueoflegends.wikia.com/wiki/League_of_Legends_Wiki')
 
     # Parse the HTML page for champion names
@@ -96,29 +104,44 @@ def get_champ_info():
         champ_url.append(champ_roster_name.get('href').strip())
 
     # Parse each champion
-    for x, champ in enumerate(champ_url):
-        stat_count = 0
+    for count, champ in enumerate(champ_url):
+        champ_stats = []
 
         # Open champion page
         main_url = get_url('http://leagueoflegends.wikia.com' + champ)
         champions_html = BeautifulSoup(main_url, 'html.parser')
 
-        # Get champion health
-        champ_roster_stat = champions_html.find(id="Health_" + champ[6:].replace("%27", "_"))
-        health = champ_roster_stat.text
-        stat_count += 1
+        # Append stats to array
+        for x, stat in enumerate(stat_type):
+            champ_roster_stat = champions_html.find(id=stat + "_" + champ[6:].replace("%27", "_"))
 
-        # Get champion health regen
-        champ_roster_stat = champions_html.find(id="HealthRegen_" + champ[6:].replace("%27", "_"))
-        health_regen = champ_roster_stat.text
-        stat_count += 1
+            # If the champion does not have that stat (eg. energy), write None instead
+            try:
+                champ_stats.append(stat + ": " + champ_roster_stat.text)
+            except AttributeError:
+                champ_stats.append(stat + ": None")
 
-        champ_stats = [health, health_regen]
-        champ_list = [champ[6:], champ_stats]
-        print(champ_list[0])
+        # Find the mana type
+        champions_resource_html = champions_html.find(style="font-size:10px; line-height:1em; display:block; color:rgb(147, 115, 65); margin-top:3px; margin-bottom:0;")
+        # Try and get the direct path of the bar
+        try:
+            champ_resource = champions_resource_html.next_sibling.next_element.contents[2].text
+        except IndexError:
+            champ_resource = "Manaless"
+        # Add stat to stat array
+        champ_stats.append("ResourceType: " + champ_resource)
 
-        for stat in range(stat_count):
-            print(champ_list[1][stat])
+        # Write champs with stats into array
+        champ_list[0].insert(len(champ_list[0]), champ[6:].replace("%27", "-"))
+        champ_list[1].insert(len(champ_list[1]), champ_stats)
+
+        #'''
+        # Debug output
+        print(champ_list[0][cnt])
+        print(champ_list[1][cnt])
+        cnt += 1
+        print("\n")
+        #'''
 
     return champ_list
 
