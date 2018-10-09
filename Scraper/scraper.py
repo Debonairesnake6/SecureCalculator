@@ -2,7 +2,8 @@ from requests import get
 from requests.exceptions import RequestException
 from contextlib import closing
 from bs4 import BeautifulSoup
-
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
 
 def get_url(url):
     """
@@ -73,7 +74,7 @@ def get_champs():
     return champ_names
 
 
-def get_champ_info():
+def get_champ_stat_info():
     """
     Get the stat information for each champion
     :return:
@@ -81,21 +82,26 @@ def get_champ_info():
 
     stat_type = ["Health",  # Keep track of each stat
                  "HealthRegen",
+                 "ResourceBar",
+                 "ResourceRegen",
                  "Range",
                  "AttackDamage",
                  "AttackSpeed",
                  "Armor",
                  "MagicResist",
-                 "MovementSpeed",
-                 "ResourceBar",
-                 "ResourceRegen"]
-    champ_list = [[], []]  # Champion Names with stats
+                 "MovementSpeed"]
+    ability_button = ["Innate",  # Each ability for each champion
+                      "Q",
+                      "W",
+                      "E",
+                      "R"]
+    champ_list = [[], [], []]  # Champion Names with stats
     champ_url = []  # Each champion wiki page
     cnt = 0  # For Debugging
     main_url = get_url('http://leagueoflegends.wikia.com/wiki/League_of_Legends_Wiki')
 
     # Parse the HTML page for champion names
-    champions_html = BeautifulSoup(main_url, 'html.parser')
+    champions_html = BeautifulSoup(main_url, 'html5lib')
     champ_roster_ol = champions_html.find(class_="champion_roster")
     champ_roster_li = champ_roster_ol.find_all('a')
 
@@ -103,25 +109,45 @@ def get_champ_info():
     for champ_roster_name in champ_roster_li:
         champ_url.append(champ_roster_name.get('href').strip())
 
+    # Load headless chrome for champion abilities
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    driver = webdriver.Chrome("ChromeHeadless/chromedriver.exe", chrome_options=chrome_options)
+
     # Parse each champion
-    for count, champ in enumerate(champ_url):
-        champ_stats = []
+    for champ in champ_url:
+        champ_stats = []  # Hold the stats for a champion
+        champ_abilities = [[], [], [], [], []]  # Hold the abilities for a champion
 
         # Open champion page
         main_url = get_url('http://leagueoflegends.wikia.com' + champ)
         champions_html = BeautifulSoup(main_url, 'html.parser')
 
         # Append stats to array
-        for x, stat in enumerate(stat_type):
-            champ_roster_stat = champions_html.find(id=stat + "_" + champ[6:].replace("%27", "_"))
+        for stat in stat_type:
+            champ_roster_stat_html = champions_html.find(id=stat + "_" + champ[6:].replace("%27", "_"))
 
             # If the champion does not have that stat (eg. energy), write None instead
             try:
-                champ_stats.append(stat + ": " + champ_roster_stat.text)
+                champ_stats.append(stat + ": " + champ_roster_stat_html.text)
             except AttributeError:
                 champ_stats.append(stat + ": None")
 
-        # Find the mana type
+        # Append stats/lvl to array
+        for stat in stat_type:
+            # Attack speed is named differently on site
+            if stat == "AttackSpeed":
+                stat = "AttackSpeedBonus"
+
+            champ_roster_stat_html = champions_html.find(id=stat + "_" + champ[6:].replace("%27", "_") + "_lvl")
+
+            # If the champion does not scale in that stat, write 0 instead
+            try:
+                champ_stats.append(stat + "Lvl: " + champ_roster_stat_html.text[2:])
+            except AttributeError:
+                champ_stats.append(stat + "Lvl: 0")
+
+        # Find the mana type, location of "Secondary Bar:" test
         champions_resource_html = champions_html.find(style="font-size:10px; line-height:1em; display:block; color:rgb(147, 115, 65); margin-top:3px; margin-bottom:0;")
         # Try and get the direct path of the bar
         try:
@@ -131,26 +157,49 @@ def get_champ_info():
         # Add stat to stat array
         champ_stats.append("ResourceType: " + champ_resource)
 
+        # Dynamically load the page to access abilities
+        driver.get('http://leagueoflegends.wikia.com' + champ)
+        driver.set_page_load_timeout(30000)
+        webpage = driver.execute_script('return document.body.innerHTML')
+        champions_ability_html = BeautifulSoup(''.join(webpage), 'html.parser')
+
+        # Get champion abilities
+        for count, ability in enumerate(ability_button):
+            # Find all stats on right side of ability bar
+            champions_ability = champions_ability_html.find(class_="skill skill_" + ability.lower()).contents[1].contents[2].contents[2].contents[0].find_all('dd')
+            for section in champions_ability:
+                try:
+                    # Combine description and stats then append to an array
+                    info = section.previousSibling.text.replace("«", "").replace("»", "") + " " + section.text.replace("\xa0", "")
+                    champ_abilities[count].append(info)
+                except IndexError:
+                    continue
+                except AttributeError:
+                    continue
+
         # Write champs with stats into array
         champ_list[0].insert(len(champ_list[0]), champ[6:].replace("%27", "-"))
         champ_list[1].insert(len(champ_list[1]), champ_stats)
+        champ_list[2].insert(len(champ_list[2]), champ_abilities)
 
         #'''
         # Debug output
         print(champ_list[0][cnt])
         print(champ_list[1][cnt])
+        for count, ability in enumerate(champ_list[2][cnt]):
+            print(ability_button[count] + ": " + str(ability))
         cnt += 1
         print("\n")
         #'''
+
+    driver.quit()
 
     return champ_list
 
 
 def main():
     champ_names = get_champs()
-    champ_info = get_champ_info()
-    #for champ in champ_info:
-    #    print(champ)
+    champ_info = get_champ_stat_info()  # TODO add champion ability status effects
 
 
 if __name__ == '__main__':
