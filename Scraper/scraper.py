@@ -2,8 +2,6 @@ from requests import get
 from requests.exceptions import RequestException
 from contextlib import closing
 from bs4 import BeautifulSoup
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
 
 def get_url(url):
     """
@@ -90,14 +88,8 @@ def get_champ_stat_info():
                  "Armor",
                  "MagicResist",
                  "MovementSpeed"]
-    ability_button = ["Innate",  # Each ability for each champion
-                      "Q",
-                      "W",
-                      "E",
-                      "R"]
-    champ_list = [[], [], []]  # Champion Names with stats
+    champ_list = [[], []]  # Champion Names with stats
     champ_url = []  # Each champion wiki page
-    cnt = 0  # For Debugging
     main_url = get_url('http://leagueoflegends.wikia.com/wiki/League_of_Legends_Wiki')
 
     # Parse the HTML page for champion names
@@ -109,15 +101,9 @@ def get_champ_stat_info():
     for champ_roster_name in champ_roster_li:
         champ_url.append(champ_roster_name.get('href').strip())
 
-    # Load headless chrome for champion abilities
-    chrome_options = Options()
-    chrome_options.add_argument("--headless")
-    driver = webdriver.Chrome("ChromeHeadless/chromedriver.exe", chrome_options=chrome_options)
-
     # Parse each champion
-    for champ in champ_url:
+    for cnt, champ in enumerate(champ_url):
         champ_stats = []  # Hold the stats for a champion
-        champ_abilities = [[], [], [], [], []]  # Hold the abilities for a champion
 
         # Open champion page
         main_url = get_url('http://leagueoflegends.wikia.com' + champ)
@@ -157,42 +143,16 @@ def get_champ_stat_info():
         # Add stat to stat array
         champ_stats.append("ResourceType: " + champ_resource)
 
-        # Dynamically load the page to access abilities
-        driver.get('http://leagueoflegends.wikia.com' + champ)
-        driver.set_page_load_timeout(30000)
-        webpage = driver.execute_script('return document.body.innerHTML')
-        champions_ability_html = BeautifulSoup(''.join(webpage), 'html.parser')
-
-        # Get champion abilities
-        for count, ability in enumerate(ability_button):
-            # Find all stats on right side of ability bar
-            champions_ability = champions_ability_html.find(class_="skill skill_" + ability.lower()).contents[1].contents[2].contents[2].contents[0].find_all('dd')
-            for section in champions_ability:
-                try:
-                    # Combine description and stats then append to an array
-                    info = section.previousSibling.text.replace("«", "").replace("»", "") + " " + section.text.replace("\xa0", "")
-                    champ_abilities[count].append(info)
-                except IndexError:
-                    continue
-                except AttributeError:
-                    continue
-
         # Write champs with stats into array
         champ_list[0].insert(len(champ_list[0]), champ[6:].replace("%27", "-"))
         champ_list[1].insert(len(champ_list[1]), champ_stats)
-        champ_list[2].insert(len(champ_list[2]), champ_abilities)
 
         #'''
         # Debug output
         print(champ_list[0][cnt])
         print(champ_list[1][cnt])
-        for count, ability in enumerate(champ_list[2][cnt]):
-            print(ability_button[count] + ": " + str(ability))
-        cnt += 1
         print("\n")
         #'''
-
-    driver.quit()
 
     return champ_list
 
