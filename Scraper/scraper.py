@@ -20,8 +20,8 @@ def get_url(url):
     """
     Send GET request to url and return HTML/XML if it exists,
     if not return None.
-    :param url:
-    :return:
+    :param url: url to download
+    :return: return page if successful
     """
 
     try:
@@ -42,8 +42,8 @@ def get_url(url):
 def got_response(resp):
     """
     Return true if response was HTML/XML
-    :param resp:
-    :return:
+    :param resp: get response from website
+    :return: return html page
     """
 
     # Get the type of page (wanting HTML)
@@ -57,7 +57,7 @@ def got_response(resp):
 def log_error(e):
     """
     Print error to stdout
-    :param e:
+    :param e: error message
     :return:
     """
 
@@ -66,6 +66,15 @@ def log_error(e):
 
 
 def push_to_sheets(request, typeofrequest, rangeofupdate="none", champ=""):
+    """
+    Put data collected onto spreadsheet for calculations
+    :param request: data to be inserted on sheet
+    :param typeofrequest: create page (0), or update cell (1)
+    :param rangeofupdate: cell range to update
+    :param champ: champion being modified
+    :return:
+    """
+
     # This section connects to the Google Sheets API and is copied from their tutorial
     sheet_id = '1ercODhUtMmEjI4230hZwXBOa-V7yPquwzuNjkJ98Ux4'
     scopes = 'https://www.googleapis.com/auth/spreadsheets'
@@ -78,10 +87,12 @@ def push_to_sheets(request, typeofrequest, rangeofupdate="none", champ=""):
 
     # Attempt to update sheet with changes
     try:
+        # Create new sheet
         if typeofrequest == 0:
             service.spreadsheets().batchUpdate(
                 spreadsheetId=sheet_id,
                 body=request).execute()
+        # Update cells on sheet
         elif typeofrequest == 1:
             service.spreadsheets().values().update(
                 spreadsheetId=sheet_id,
@@ -91,15 +102,18 @@ def push_to_sheets(request, typeofrequest, rangeofupdate="none", champ=""):
 
     # Catch error on changes and print error message
     except HttpError as e:
+        # Find position of quotation marks
         error = str(e)
         message = []
         for pos, char in enumerate(error):
             if char == "\"":
                 message.append(pos)
 
+        # Display creating sheet for champion if said sheet does not exist
         if error[message[0] + 1:message[0] + 23] == "Unable to parse range:":
             log_error("Creating new page for " + champ)
             return "newPage"
+        # Log error message (not including type of error)
         else:
             log_error(error[message[0] + 1:message[message.__len__() - 1]])
 
@@ -109,7 +123,7 @@ def push_to_sheets(request, typeofrequest, rangeofupdate="none", champ=""):
 def get_champ_stat_info():
     """
     Get the stat information for each champion
-    :return:
+    :return: return double array of each champion and their stats
     """
 
     stat_type = ["Health",  # Keep track of each stat
@@ -155,10 +169,8 @@ def get_champ_stat_info():
 
             # If the champion does not have that stat (eg. energy), write None instead
             try:
-                #champ_stats.append(stat + ": " + champ_roster_stat_html.text)
                 champ_stats.append(champ_roster_stat_html.text)
             except AttributeError:
-                #champ_stats.append(stat + ": None")
                 champ_stats.append("0")
 
         # Append stats/lvl to array
@@ -171,10 +183,8 @@ def get_champ_stat_info():
 
             # If the champion does not scale in that stat, write 0 instead
             try:
-                #champ_stats.append(stat + "Lvl: " + champ_roster_stat_html.text[2:])
                 champ_stats.append(champ_roster_stat_html.text[2:])
             except AttributeError:
-                #champ_stats.append(stat + "Lvl: 0")
                 champ_stats.append("0")
 
         # Find the mana type, location of "Secondary Bar:" test
@@ -195,17 +205,15 @@ def get_champ_stat_info():
 
         print(champ[6:])
 
-        '''
-        # Debug output
-        print(champ_list[0][cnt])
-        print(champ_list[1][cnt])
-        print("\n")
-        '''
-
     return champ_list
 
 
 def google_sheets(champ_list):
+    """
+    Prepare data to insert to google sheets API
+    :param champ_list: double array of each champion and their stats
+    :return:
+    """
 
     # FOR TESTING ONLY
     sheet_ranges = ['Aatrox',
@@ -215,7 +223,7 @@ def google_sheets(champ_list):
     for cnt, champ in enumerate(sheet_ranges):  # REPLACE WITH CHAMP_LIST ONCE FINISHED
         status = ""  # Status of update
         while status != "pass":  # Try again if the update does not pass
-            request = {  # Dictionary to old updates
+            request = {  # Dictionary to hold updates
                 "values": [
                     [champ, "HP", "HPRgn", "MP", "MPRgn", "AP", "AD", "AS",
                      "AR", "MR", "MS", "CDR", "Pass. Stacks", "Lvl"],
@@ -226,7 +234,8 @@ def google_sheets(champ_list):
                      "=" + champ_list[1][cnt][3] + "+(" + champ_list[1][cnt][12] + "*(N3-1))*(0.7025+0.0175*(N3-1))",
                      "",  # AP
                      "=" + champ_list[1][cnt][4] + "+(" + champ_list[1][cnt][13] + "*(N3-1))*(0.7025+0.0175*(N3-1))",
-                     "=" + champ_list[1][cnt][5] + "+(" + champ_list[1][cnt][14] + "*(N3-1))*(0.7025+0.0175*(N3-1))",
+                     "=" + champ_list[1][cnt][5] + "+((" + str(float(champ_list[1][cnt][14]) / 100) + "*" +
+                     champ_list[1][cnt][5] + ")*(N3-1))*(0.7025+0.0175*(N3-1))",
                      "=" + champ_list[1][cnt][6] + "+(" + champ_list[1][cnt][15] + "*(N3-1))*(0.7025+0.0175*(N3-1))",
                      "=" + champ_list[1][cnt][7] + "+(" + champ_list[1][cnt][16] + "*(N3-1))*(0.7025+0.0175*(N3-1))",
                      "=" + champ_list[1][cnt][8] + "+(" + champ_list[1][cnt][17] + "*(N3-1))*(0.7025+0.0175*(N3-1))",
@@ -254,7 +263,7 @@ def google_sheets(champ_list):
 
 
 def main():
-    champ_list = get_champ_stat_info()  # TODO send champ info to spreadsheet
+    champ_list = get_champ_stat_info()
     google_sheets(champ_list)
 
 
