@@ -29,7 +29,7 @@ info = {}  # Start of dictionary to hold all items
 mkdir_lock = threading.Lock()  # Lock for creating directories to store web pages
 counter_lock = threading.Lock()  # Lock for limiting the number of threads
 patch = ''  # Current patch version
-cwd = ''  # Main directory to store we pages
+cwd = ''  # Main directory to store web pages
 thread_count = 0  # Current thread count
 
 
@@ -70,7 +70,7 @@ def get_web_page(page_name, path='', sub_path=''):
         with open(file_path, 'w') as web_page:
             # Use pywebcopy to obtain web page with encoding and save to file
             web_page_copy = WebPage(
-                url='http://leagueoflegends.wikia.com/wiki/' + page_name,
+                url=''.join(['http://leagueoflegends.wikia.com/wiki/', page_name]),
                 project_folder=cwd,
             ).encode('ascii')
             web_page.write(web_page_copy.decode('utf-8'))
@@ -162,16 +162,16 @@ def get_patch():
         try:
             os.mkdir(path)
         except OSError:
-            log_error('Failed to create directory for path: ' + os.getcwd() + patch)
+            log_error(''.join(['Failed to create directory for path: ', os.getcwd(), patch]))
 
     # Detect if current patch is a new patch
-    if not os.path.isdir(path + patch):
+    if not os.path.isdir(''.join([path, patch])):
         try:
             rmtree(path)
             os.mkdir(path)
-            os.mkdir(path + patch)
+            os.mkdir(''.join([path, patch]))
         except OSError:
-            log_error('Failed to create directory for patch: ' + os.getcwd() + path + patch)
+            log_error(''.join(['Failed to create directory for patch: ', os.getcwd(), path, patch]))
 
     # Grab current directory for pywebcopy and change path to write files
     cwd = os.getcwd()
@@ -277,7 +277,7 @@ def get_champ_stat_info():
 
         # Append stats to array
         for stat in stat_type:
-            champ_roster_stat_html = champions_html.find(id=stat + "_" + champ[6:].replace("%27", "_"))
+            champ_roster_stat_html = champions_html.find(id=''.join([stat, "_", champ[6:].replace("%27", "_")]))
 
             # If the champion does not have that stat (eg. energy), write None instead
             try:
@@ -291,7 +291,7 @@ def get_champ_stat_info():
             if stat == "AttackSpeed":
                 stat = "AttackSpeedBonus"
 
-            champ_roster_stat_html = champions_html.find(id=stat + "_" + champ[6:].replace("%27", "_") + "_lvl")
+            champ_roster_stat_html = champions_html.find(id=''.join([stat, "_", champ[6:].replace("%27", "_"), "_lvl"]))
 
             # If the champion does not scale in that stat, write 0 instead
             try:
@@ -309,7 +309,7 @@ def get_champ_stat_info():
         except IndexError:
             champ_resource = "Manaless"
         # Add stat to stat array
-        champ_stats.append("ResourceType: " + champ_resource)
+        champ_stats.append(''.join(["ResourceType: ", champ_resource]))
 
         # Write champs with stats into array
         champ_list[0].insert(len(champ_list[0]), champ[6:].replace("%27", "-"))
@@ -340,24 +340,32 @@ def google_sheets(champ_list):
                     [champ, "HP", "HPRgn", "MP", "MPRgn", "AP", "AD", "AS",
                      "AR", "MR", "MS", "CDR", "Pass. Stacks", "Lvl"],
                     ["Base",
-                     "=" + champ_list[1][cnt][0] + "+(" + champ_list[1][cnt][9] + "*(N3-1))*(0.7025+0.0175*(N3-1))",
-                     "=" + champ_list[1][cnt][1] + "+(" + champ_list[1][cnt][10] + "*(N3-1))*(0.7025+0.0175*(N3-1))",
-                     "=" + champ_list[1][cnt][2] + "+(" + champ_list[1][cnt][11] + "*(N3-1))*(0.7025+0.0175*(N3-1))",
-                     "=" + champ_list[1][cnt][3] + "+(" + champ_list[1][cnt][12] + "*(N3-1))*(0.7025+0.0175*(N3-1))",
+                     ''.join(["=", champ_list[1][cnt][0], "+(", champ_list[1][cnt][9],
+                              "*(N3-1))*(0.7025+0.0175*(N3-1))"]),
+                     ''.join(["=", champ_list[1][cnt][1], "+(", champ_list[1][cnt][10],
+                              "*(N3-1))*(0.7025+0.0175*(N3-1))"]),
+                     ''.join(["=", champ_list[1][cnt][2], "+(", champ_list[1][cnt][11],
+                              "*(N3-1))*(0.7025+0.0175*(N3-1))"]),
+                     ''.join(["=", champ_list[1][cnt][3], "+(", champ_list[1][cnt][12],
+                              "*(N3-1))*(0.7025+0.0175*(N3-1))"]),
                      "",  # AP
-                     "=" + champ_list[1][cnt][4] + "+(" + champ_list[1][cnt][13] + "*(N3-1))*(0.7025+0.0175*(N3-1))",
-                     "=" + champ_list[1][cnt][5] + "+((" + str(float(champ_list[1][cnt][14]) / 100) + "*" +
-                     champ_list[1][cnt][5] + ")*(N3-1))*(0.7025+0.0175*(N3-1))",
-                     "=" + champ_list[1][cnt][6] + "+(" + champ_list[1][cnt][15] + "*(N3-1))*(0.7025+0.0175*(N3-1))",
-                     "=" + champ_list[1][cnt][7] + "+(" + champ_list[1][cnt][16] + "*(N3-1))*(0.7025+0.0175*(N3-1))",
-                     "=" + champ_list[1][cnt][8] + "+(" + champ_list[1][cnt][17] + "*(N3-1))*(0.7025+0.0175*(N3-1))",
+                     ''.join(["=", champ_list[1][cnt][4], "+(", champ_list[1][cnt][13],
+                              "*(N3-1))*(0.7025+0.0175*(N3-1))"]),
+                     ''.join(["=", champ_list[1][cnt][5], "+((", str(float(champ_list[1][cnt][14]) / 100), "*",
+                              champ_list[1][cnt][5], ")*(N3-1))*(0.7025+0.0175*(N3-1))"]),
+                     ''.join(["=", champ_list[1][cnt][6], "+(", champ_list[1][cnt][15],
+                              "*(N3-1))*(0.7025+0.0175*(N3-1))"]),
+                     ''.join(["=", champ_list[1][cnt][7], "+(", champ_list[1][cnt][16],
+                              "*(N3-1))*(0.7025+0.0175*(N3-1))"]),
+                     ''.join(["=", champ_list[1][cnt][8], "+(", champ_list[1][cnt][17],
+                              "*(N3-1))*(0.7025+0.0175*(N3-1))"]),
                      "",  # CDR
                      "",  # Stacks
                      "18"]  # Lvl
                 ]
             }
             # Try and update sheet and get return status
-            status = push_to_sheets(request, 1, champ + "!A2:N3", champ=champ)
+            status = push_to_sheets(request, 1, ''.join([champ, "!A2:N3"]), champ=champ)
 
             # If a new page is needed create one for the champion
             if status == "newPage":
@@ -425,7 +433,7 @@ def get_item_info(item_name, cnt, finished_items_html, item_html):
     except TypeError:
         return
 
-    log_status('Item completed: ' + name)
+    log_status(''.join(['Item completed: ', name]))
     sys.stdout.flush()
     info[item_section][name] = current_info
     return
@@ -445,7 +453,7 @@ def get_stats(section, current_info):
                         type_of_stat = item.text.strip().split(' ', 1)[1]
                     else:
                         stat_amount = item.text.strip().split(' ', 2)[1]
-                        type_of_stat = 'gold ' + item.text.strip().split(' ', 2)[2]
+                        type_of_stat = ''.join(['gold ', item.text.strip().split(' ', 2)[2]])
                     current_info['stats'][type_of_stat] = stat_amount
     except AttributeError:
         pass
@@ -525,7 +533,7 @@ def get_item():
                category == 'Trinkets':
                 continue
 
-            log_status('Starting Section: ' + finished_items_html.contents[cnt].text.strip())
+            log_status(''.join(['Starting Section: ', finished_items_html.contents[cnt].text.strip()]))
             sys.stdout.flush()
             info[finished_items_html.contents[cnt].text.strip()] = {}
 
@@ -579,10 +587,10 @@ def main():
     seconds = round(total_time % 60)
     if seconds > 10:
         log_status('M:S')
-        log_status(str(minutes) + ':' + str(seconds))
+        log_status(''.join([str(minutes), ':', str(seconds)]))
     else:
         log_status('M:S')
-        log_status(str(minutes) + ':0' + str(seconds))
+        log_status(''.join([str(minutes), ':0', str(seconds)]))
 
 
 if __name__ == '__main__':
