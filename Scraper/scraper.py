@@ -4,6 +4,8 @@ To run the project run the following pip commands
 pip install --upgrade google-api-python-client oauth2client
 pip install requests
 pip install bs4
+pip install pywebcopy
+pip install pathlib
 """
 
 from requests import get  # Download html page
@@ -14,6 +16,70 @@ from googleapiclient.discovery import build  # Build connection for authenticati
 from googleapiclient.errors import HttpError  # Catch HttpErrors
 from httplib2 import Http  # Use Http to connect to API
 from oauth2client import file, client, tools  # Used for authentication with API
+from pywebcopy import WebPage  # Download html pages
+from shutil import rmtree  # Delete old patch folder
+from pathlib import Path  # Variable to hold path
+import threading  # Used for threading items
+import time  # Timer to test speed of program
+import sys  # Flush stdout to print in child process
+import os  # Detect if file directory for patch exists
+
+
+# Global variables
+info = {}  # Start of dictionary to hold all items
+mkdir_lock = threading.Lock()  # Lock for creating directories to store web pages
+counter_lock = threading.Lock()  # Lock for limiting the number of threads
+patch = ''  # Current patch version
+cwd = ''  # Main directory to store we pages
+thread_count = 0  # Current thread count
+
+
+def get_web_page(page_name, path, sub_path=''):
+    """
+    Either fetch page from saved pages or get it from the wiki
+    :return: contents of the web page
+    """
+
+    global patch
+    global cwd
+    item_path = Path(patch + path + sub_path + '/' + page_name + '_Page.html')
+
+    # Create directories if they do not already exist
+    with mkdir_lock:
+        if sub_path is not '':
+            if not os.path.exists(patch + path + sub_path):
+                os.mkdir(patch + path + sub_path)
+        else:
+            if not os.path.exists(patch + path):
+                os.mkdir(patch + path)
+
+    # Try to open downloaded Item page
+    try:
+        if os.stat(item_path).st_size == 0:
+            os.remove(item_path)
+            raise FileNotFoundError
+
+        with open(item_path) as web_page:
+            main_url = web_page.read()
+
+        return main_url
+
+    # If correct patch item page is not found, generate a new one
+    except FileNotFoundError:
+        # Create/close item page html file
+        with open(item_path, 'w') as web_page:
+            # Use pywebcopy to obtain web page with encoding and save to file
+            web_page_copy = WebPage(
+                url='http://leagueoflegends.wikia.com/wiki/' + page_name,
+                project_folder=cwd,
+            ).encode('ascii')
+            web_page.write(web_page_copy.decode('utf-8'))
+
+        # Open and read newly created file
+        with open(item_path, 'r') as web_page:
+            main_url = web_page.read()
+
+        return main_url
 
 
 def get_url(url):
@@ -63,6 +129,53 @@ def log_error(e):
 
     # Print error message
     print(e)
+
+
+def log_status(status):
+    """
+    Print to stdout
+    :param status: message to print
+    :return:
+    """
+
+    print(status)
+
+
+def get_patch():
+    """
+    Get the current patch to determine if a re-download of the pages are necessary
+    :return:
+    """
+
+    global patch
+    global cwd
+
+    # Get the current patch number
+    main_url = get_url('http://leagueoflegends.wikia.com/wiki/League_of_Legends_Wiki')
+    patch_html = BeautifulSoup(main_url, 'html5lib')
+    current_patch_html = patch_html.find(id='navigation')
+    patch = current_patch_html.contents[55].contents[2].text.split(' ', 1)[1]
+    path = 'leagueoflegends.wikia.com/'
+
+    # Create main folder if not already existing
+    if not os.path.isdir(path):
+        try:
+            os.mkdir(path)
+        except OSError:
+            log_error('Failed to create directory for path: ' + os.getcwd() + patch)
+
+    # Detect if current patch is a new patch
+    if not os.path.isdir(path + patch):
+        try:
+            rmtree(path)
+            os.mkdir(path)
+            os.mkdir(path + patch)
+        except OSError:
+            log_error('Failed to create directory for patch: ' + os.getcwd() + path + patch)
+
+    # Grab current directory for pywebcopy and change path to write files
+    cwd = os.getcwd()
+    os.chdir(path)
 
 
 def push_to_sheets(request, typeofrequest, rangeofupdate="none", champ=""):
@@ -130,7 +243,6 @@ def get_champ_stat_info():
                  "HealthRegen",
                  "ResourceBar",
                  "ResourceRegen",
-                 #"Range",
                  "AttackDamage",
                  "AttackSpeed",
                  "Armor",
@@ -149,7 +261,7 @@ def get_champ_stat_info():
     for champ_roster_name in champ_roster_li:
         champ_url.append(champ_roster_name.get('href').strip())
 
-    print("Getting champion info for;")
+    log_status("Getting champion info for;")
 
     #FOR DEBUGGING ONLY REMOVE AFTER COMPLETE
     champ_list_testing = ["/wiki/Aatrox",
@@ -161,7 +273,7 @@ def get_champ_stat_info():
 
         # Open champion page
         main_url = get_url('http://leagueoflegends.wikia.com' + champ)
-        champions_html = BeautifulSoup(main_url, 'html.parser')
+        champions_html = BeautifulSoup(main_url, 'html5lib')
 
         # Append stats to array
         for stat in stat_type:
@@ -203,7 +315,7 @@ def get_champ_stat_info():
         champ_list[0].insert(len(champ_list[0]), champ[6:].replace("%27", "-"))
         champ_list[1].insert(len(champ_list[1]), champ_stats)
 
-        print(champ[6:])
+        log_status(champ[6:])
 
     return champ_list
 
@@ -262,9 +374,209 @@ def google_sheets(champ_list):
                 push_to_sheets(request, 0)
 
 
+def get_item_page(section, cnt, finished_items_html, category):
+    global thread_count
+    item_name = section.contents[0].contents[0].contents[0].get('href')
+    saved_item_name = item_name[6:].replace('%27', '\'').replace('_', ' ')
+    item_grid_html = get_web_page(saved_item_name, '/Items/', category)
+    item_html = BeautifulSoup(item_grid_html, 'html5lib')
+    get_item_info(item_name, cnt, finished_items_html, item_html)
+    with counter_lock:
+        thread_count -= 1
+
+
+def get_item_info(item_name, cnt, finished_items_html, item_html):
+    # Get info for dictionary entry
+    global info
+    name = item_name[6:].replace('%27', '\'').replace('_', ' ')
+    item_section = finished_items_html.contents[cnt - 2].text.strip()
+
+    # Get item info box
+    item_list = item_html.find(class_='portable-infobox pi-background pi-theme-wikia pi-layout-stacked')
+
+    # Check if item, if not then skip (e.g. skip GP ult upgrades)
+    try:
+        # Check if item is sub-item (e.g. Doran's Lost Shield)
+        if name != item_list.contents[1].contents[0]:
+            return
+    except AttributeError:
+        return
+
+    info[item_section][name] = {}
+
+    # Get all information about the current item
+    try:
+        for section in item_list:
+            try:
+                section_name = section.contents[0].text.strip()
+                if section_name == 'Stats':
+                    get_stats(section, name, item_section)
+                elif section_name == 'Passive':
+                    get_passive(section, name, item_section)
+                elif section_name[:12] == 'Availability':
+                    get_map(section, name, item_section)
+                elif section_name[:4] == 'Cost':
+                    cost = section.contents[0].contents[3].contents[1].contents[1].text
+                    info[item_section][name]['cost'] = cost
+            except AttributeError:
+                pass
+            except TypeError:
+                pass
+    except TypeError:
+        return
+
+    log_status('Item completed: ' + name)
+    sys.stdout.flush()
+    return
+
+
+def get_stats(section, name, item_section):
+    global info
+    info[item_section][name]['stats'] = {}
+
+    # Loop through each stat row
+    try:
+        for part, item in enumerate(section):
+            if part % 2 == 0 and part != 0:
+                if item.text.strip()[0] == "+":
+                    stat_amount = item.text.strip().split(' ', 1)[0][1:]
+
+                    if stat_amount != '':
+                        type_of_stat = item.text.strip().split(' ', 1)[1]
+                    else:
+                        stat_amount = item.text.strip().split(' ', 2)[1]
+                        type_of_stat = 'gold ' + item.text.strip().split(' ', 2)[2]
+                    info[item_section][name]['stats'][type_of_stat] = stat_amount
+    except AttributeError:
+        pass
+
+
+def get_passive(section, name, item_section):
+    global info
+    info[item_section][name]['passive'] = {}
+
+    # Loop though each passive row
+    try:
+        for part, item in enumerate(section):
+            if part % 2 == 0 and part != 0:
+                passive = item.text.strip()
+                if passive.find('  ') == -1:
+                    info[item_section][name]['passive'][part // 2] = item.text.strip()
+                else:
+                    passive_edit = passive.replace('  +', ' gold +')
+                    if passive == passive_edit:
+                        passive_edit = passive.replace('  ', ' ')
+                    info[item_section][name]['passive'][part // 2] = passive_edit
+
+    except AttributeError:
+        pass
+
+
+def get_map(section, name, item_section):
+    global info
+    info[item_section][name]['map'] = {}
+
+    for cnt, map_section in enumerate(section.contents[0].contents[5].contents[1]):
+        if cnt % 2 == 0:
+            continue
+
+        map_name = section.contents[0].contents[3].contents[1].contents[cnt].text
+        if map_section.contents[0].contents[0].get('alt') == 'Done':
+            info[item_section][name]['map'][map_name] = 'yes'
+        else:
+            info[item_section][name]['map'][map_name] = 'no'
+
+
+def get_item():
+    """
+    Return all item information from all maps
+    :return: item information
+    """
+
+    # Start of dictionary to hold all items
+    global info
+    global patch
+    global thread_count
+
+    main_url = get_web_page('Item', '/Items')
+
+    # Use the item page and set up parsing
+    item_grid_html = BeautifulSoup(main_url, 'html5lib')
+
+    # Find the item grid and start to parse
+    finished_items_html = item_grid_html.find(id='item-grid')
+    sections = finished_items_html.contents
+
+    for cnt, null in enumerate(sections):
+
+        # Add section to dictionary
+        if cnt % 4 == 1:
+            category = finished_items_html.contents[cnt].text.strip()
+
+            if category == 'Potions and Consumables' or \
+               category == 'Distributed' or \
+               category == 'Removed items' or \
+               category == 'Trinkets':
+                continue
+
+            log_status('Starting Section: ' + finished_items_html.contents[cnt].text.strip())
+            sys.stdout.flush()
+            info[finished_items_html.contents[cnt].text.strip()] = {}
+
+        # Go to each item's page
+        if cnt % 4 == 3:
+            category = finished_items_html.contents[cnt - 2].text.strip()
+
+            if category == 'Potions and Consumables' or \
+               category == 'Distributed' or \
+               category == 'Removed items' or \
+               category == 'Trinkets':
+                continue
+
+            all_item_threads = []
+
+            # Get the page for each item in the category and start to parse
+            for section in finished_items_html.contents[cnt]:
+                item_name = section.contents[0].contents[0].contents[0].get('href')
+                current_item_name = item_name[6:].replace('%27', '\'').replace('_', ' ')
+
+                while True:
+                    if thread_count < len(finished_items_html):
+                        # Get information about item
+                        thread = threading.Thread(target=get_item_page,
+                                                  args=(section, cnt, finished_items_html, category),
+                                                  name=current_item_name)
+                        all_item_threads.append(thread)
+                        thread.start()
+                        with counter_lock:
+                            thread_count += 1
+                        break
+
+            for thread in all_item_threads:
+                thread.join()
+            log_status('\n')
+
+            #break
+    temp = info.copy()
+    return
+
+
 def main():
-    champ_list = get_champ_stat_info()
-    google_sheets(champ_list)
+    start_time = time.time()
+    get_patch()
+    #champ_list = get_champ_stat_info()
+    #google_sheets(champ_list)
+    get_item()
+    end_time = time.time()
+    total_time = end_time - start_time
+    minutes = round(total_time / 60)
+    seconds = round(total_time % 60)
+    if seconds > 10:
+        log_status('M:S')
+        log_status(str(minutes) + ':' + str(seconds))
+    else:
+        log_status('M:S')
+        log_status(str(minutes) + ':0' + str(seconds))
 
 
 if __name__ == '__main__':
