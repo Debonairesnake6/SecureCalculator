@@ -8,22 +8,21 @@ pip install pywebcopy
 pip install pathlib
 """
 
-from requests import get  # Download html page
-from requests.exceptions import RequestException  # Get download exceptions
+import os  # Detect if file directory for patch exists
+import sys  # Flush stdout to print in child process
+import threading  # Used for threading items
+import time  # Timer to test speed of program
 from contextlib import closing  # Close connection after receiving page
+from shutil import rmtree  # Delete old patch folder
+
 from bs4 import BeautifulSoup  # Parse html page
 from googleapiclient.discovery import build  # Build connection for authentication
 from googleapiclient.errors import HttpError  # Catch HttpErrors
 from httplib2 import Http  # Use Http to connect to API
 from oauth2client import file, client, tools  # Used for authentication with API
 from pywebcopy import WebPage  # Download html pages
-from shutil import rmtree  # Delete old patch folder
-from pathlib import Path  # Variable to hold path
-import threading  # Used for threading items
-import time  # Timer to test speed of program
-import sys  # Flush stdout to print in child process
-import os  # Detect if file directory for patch exists
-
+from requests import get  # Download html page
+from requests.exceptions import RequestException  # Get download exceptions
 
 # Global variables
 info = {}  # Start of dictionary to hold all items
@@ -34,7 +33,7 @@ cwd = ''  # Main directory to store we pages
 thread_count = 0  # Current thread count
 
 
-def get_web_page(page_name, path, sub_path=''):
+def get_web_page(page_name, path='', sub_path=''):
     """
     Either fetch page from saved pages or get it from the wiki
     :return: contents of the web page
@@ -42,24 +41,25 @@ def get_web_page(page_name, path, sub_path=''):
 
     global patch
     global cwd
-    item_path = Path(patch + path + sub_path + '/' + page_name + '_Page.html')
+    folder_path = ''.join([patch, path, sub_path, '/'])
+    file_path = ''.join([folder_path, page_name, '_Page.html'])
 
     # Create directories if they do not already exist
     with mkdir_lock:
         if sub_path is not '':
-            if not os.path.exists(patch + path + sub_path):
-                os.mkdir(patch + path + sub_path)
+            if not os.path.exists(folder_path):
+                os.mkdir(folder_path)
         else:
-            if not os.path.exists(patch + path):
-                os.mkdir(patch + path)
+            if not os.path.exists(folder_path):
+                os.mkdir(folder_path)
 
     # Try to open downloaded Item page
     try:
-        if os.stat(item_path).st_size == 0:
-            os.remove(item_path)
+        if os.stat(file_path).st_size == 0:
+            os.remove(file_path)
             raise FileNotFoundError
 
-        with open(item_path) as web_page:
+        with open(file_path) as web_page:
             main_url = web_page.read()
 
         return main_url
@@ -67,7 +67,7 @@ def get_web_page(page_name, path, sub_path=''):
     # If correct patch item page is not found, generate a new one
     except FileNotFoundError:
         # Create/close item page html file
-        with open(item_path, 'w') as web_page:
+        with open(file_path, 'w') as web_page:
             # Use pywebcopy to obtain web page with encoding and save to file
             web_page_copy = WebPage(
                 url='http://leagueoflegends.wikia.com/wiki/' + page_name,
@@ -76,7 +76,7 @@ def get_web_page(page_name, path, sub_path=''):
             web_page.write(web_page_copy.decode('utf-8'))
 
         # Open and read newly created file
-        with open(item_path, 'r') as web_page:
+        with open(file_path, 'r') as web_page:
             main_url = web_page.read()
 
         return main_url
@@ -250,7 +250,7 @@ def get_champ_stat_info():
                  "MovementSpeed"]
     champ_list = [[], []]  # Champion Names with stats
     champ_url = []  # Each champion wiki page
-    main_url = get_url('http://leagueoflegends.wikia.com/wiki/League_of_Legends_Wiki')
+    main_url = get_web_page('League_of_Legends_Wiki')
 
     # Parse the HTML page for champion names
     champions_html = BeautifulSoup(main_url, 'html5lib')
@@ -272,7 +272,7 @@ def get_champ_stat_info():
         champ_stats = []  # Hold the stats for a champion
 
         # Open champion page
-        main_url = get_url('http://leagueoflegends.wikia.com' + champ)
+        main_url = get_web_page(champ, '/Champions/')
         champions_html = BeautifulSoup(main_url, 'html5lib')
 
         # Append stats to array
@@ -402,7 +402,7 @@ def get_item_info(item_name, cnt, finished_items_html, item_html):
     except AttributeError:
         return
 
-    info[item_section][name] = {}
+    current_info = {}
 
     # Get all information about the current item
     try:
@@ -410,14 +410,14 @@ def get_item_info(item_name, cnt, finished_items_html, item_html):
             try:
                 section_name = section.contents[0].text.strip()
                 if section_name == 'Stats':
-                    get_stats(section, name, item_section)
+                    current_info = get_stats(section, current_info)
                 elif section_name == 'Passive':
-                    get_passive(section, name, item_section)
+                    current_info = get_passive(section, current_info)
                 elif section_name[:12] == 'Availability':
-                    get_map(section, name, item_section)
+                    current_info = get_map(section, current_info)
                 elif section_name[:4] == 'Cost':
                     cost = section.contents[0].contents[3].contents[1].contents[1].text
-                    info[item_section][name]['cost'] = cost
+                    current_info['cost'] = cost
             except AttributeError:
                 pass
             except TypeError:
@@ -427,12 +427,12 @@ def get_item_info(item_name, cnt, finished_items_html, item_html):
 
     log_status('Item completed: ' + name)
     sys.stdout.flush()
+    info[item_section][name] = current_info
     return
 
 
-def get_stats(section, name, item_section):
-    global info
-    info[item_section][name]['stats'] = {}
+def get_stats(section, current_info):
+    current_info['stats'] = {}
 
     # Loop through each stat row
     try:
@@ -446,14 +446,16 @@ def get_stats(section, name, item_section):
                     else:
                         stat_amount = item.text.strip().split(' ', 2)[1]
                         type_of_stat = 'gold ' + item.text.strip().split(' ', 2)[2]
-                    info[item_section][name]['stats'][type_of_stat] = stat_amount
+                    current_info['stats'][type_of_stat] = stat_amount
     except AttributeError:
         pass
 
+    return current_info
 
-def get_passive(section, name, item_section):
+
+def get_passive(section, current_info):
     global info
-    info[item_section][name]['passive'] = {}
+    current_info['passive'] = {}
 
     # Loop though each passive row
     try:
@@ -461,20 +463,22 @@ def get_passive(section, name, item_section):
             if part % 2 == 0 and part != 0:
                 passive = item.text.strip()
                 if passive.find('  ') == -1:
-                    info[item_section][name]['passive'][part // 2] = item.text.strip()
+                    current_info['passive'][part // 2] = item.text.strip()
                 else:
                     passive_edit = passive.replace('  +', ' gold +')
                     if passive == passive_edit:
                         passive_edit = passive.replace('  ', ' ')
-                    info[item_section][name]['passive'][part // 2] = passive_edit
+                    current_info['passive'][part // 2] = passive_edit
 
     except AttributeError:
         pass
 
+    return current_info
 
-def get_map(section, name, item_section):
+
+def get_map(section, current_info):
     global info
-    info[item_section][name]['map'] = {}
+    current_info['map'] = {}
 
     for cnt, map_section in enumerate(section.contents[0].contents[5].contents[1]):
         if cnt % 2 == 0:
@@ -482,9 +486,11 @@ def get_map(section, name, item_section):
 
         map_name = section.contents[0].contents[3].contents[1].contents[cnt].text
         if map_section.contents[0].contents[0].get('alt') == 'Done':
-            info[item_section][name]['map'][map_name] = 'yes'
+            current_info['map'][map_name] = 'yes'
         else:
-            info[item_section][name]['map'][map_name] = 'no'
+            current_info['map'][map_name] = 'no'
+
+    return current_info
 
 
 def get_item():
