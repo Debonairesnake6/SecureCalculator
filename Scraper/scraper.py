@@ -188,6 +188,8 @@ def push_to_sheets(request, typeofrequest, rangeofupdate="none", champ=""):
     :return:
     """
 
+    os.chdir('..')
+
     # This section connects to the Google Sheets API and is copied from their tutorial
     sheet_id = '1ercODhUtMmEjI4230hZwXBOa-V7yPquwzuNjkJ98Ux4'
     scopes = 'https://www.googleapis.com/auth/spreadsheets'
@@ -229,6 +231,8 @@ def push_to_sheets(request, typeofrequest, rangeofupdate="none", champ=""):
         # Log error message (not including type of error)
         else:
             log_error(error[message[0] + 1:message[message.__len__() - 1]])
+
+    os.chdir('leagueoflegends.wikia.com')
 
     return "pass"
 
@@ -272,7 +276,7 @@ def get_champ_stat_info():
         champ_stats = []  # Hold the stats for a champion
 
         # Open champion page
-        main_url = get_web_page(champ, '/Champions/')
+        main_url = get_web_page(champ[6:].replace('%27', '\'').replace('_', ' '), '/Champions/')
         champions_html = BeautifulSoup(main_url, 'html5lib')
 
         # Append stats to array
@@ -570,7 +574,7 @@ def get_item():
                 thread.join()
             log_status('\n')
 
-            #break
+            break
     temp = info.copy()
     return
 
@@ -578,8 +582,8 @@ def get_item():
 def main():
     start_time = time.time()
     get_patch()
-    #champ_list = get_champ_stat_info()
-    #google_sheets(champ_list)
+    champ_list = get_champ_stat_info()
+    google_sheets(champ_list)
     get_item()
     end_time = time.time()
     total_time = end_time - start_time
