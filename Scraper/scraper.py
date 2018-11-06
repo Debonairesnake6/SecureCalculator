@@ -6,6 +6,7 @@ pip install requests
 pip install bs4
 pip install pywebcopy
 pip install pathlib
+pip install lxml
 """
 
 import os  # Detect if file directory for patch exists
@@ -28,6 +29,7 @@ from requests.exceptions import RequestException  # Get download exceptions
 info = {}  # Start of dictionary to hold all items
 mkdir_lock = threading.Lock()  # Lock for creating directories to store web pages
 counter_lock = threading.Lock()  # Lock for limiting the number of threads
+bs4_lock = threading.Lock()
 patch = ''  # Current patch version
 cwd = ''  # Main directory to store web pages
 thread_count = 0  # Current thread count
@@ -152,7 +154,8 @@ def get_patch():
 
     # Get the current patch number
     main_url = get_url('http://leagueoflegends.wikia.com/wiki/League_of_Legends_Wiki')
-    patch_html = BeautifulSoup(main_url, 'html5lib')
+    with bs4_lock:
+        patch_html = BeautifulSoup(main_url, 'lxml')
     current_patch_html = patch_html.find(id='navigation')
     patch = current_patch_html.contents[55].contents[2].text.split(' ', 1)[1]
     path = 'leagueoflegends.wikia.com/'
@@ -257,7 +260,8 @@ def get_champ_stat_info():
     main_url = get_web_page('League_of_Legends_Wiki')
 
     # Parse the HTML page for champion names
-    champions_html = BeautifulSoup(main_url, 'html5lib')
+    with bs4_lock:
+        champions_html = BeautifulSoup(main_url, 'lxml')
     champ_roster_ol = champions_html.find(class_="champion_roster")
     champ_roster_li = champ_roster_ol.find_all('a')
 
@@ -277,7 +281,8 @@ def get_champ_stat_info():
 
         # Open champion page
         main_url = get_web_page(champ[6:].replace('%27', '\'').replace('_', ' '), '/Champions/')
-        champions_html = BeautifulSoup(main_url, 'html5lib')
+        with bs4_lock:
+            champions_html = BeautifulSoup(main_url, 'lxml')
 
         # Append stats to array
         for stat in stat_type:
@@ -391,7 +396,8 @@ def get_item_page(section, cnt, finished_items_html, category):
     item_name = section.contents[0].contents[0].contents[0].get('href')
     saved_item_name = item_name[6:].replace('%27', '\'').replace('_', ' ')
     item_grid_html = get_web_page(saved_item_name, '/Items/', category)
-    item_html = BeautifulSoup(item_grid_html, 'html5lib')
+    with bs4_lock:
+        item_html = BeautifulSoup(item_grid_html, 'lxml')
     get_item_info(item_name, cnt, finished_items_html, item_html)
     with counter_lock:
         thread_count -= 1
@@ -519,7 +525,8 @@ def get_item():
     main_url = get_web_page('Item', '/Items')
 
     # Use the item page and set up parsing
-    item_grid_html = BeautifulSoup(main_url, 'html5lib')
+    with bs4_lock:
+        item_grid_html = BeautifulSoup(main_url, 'lxml')
 
     # Find the item grid and start to parse
     finished_items_html = item_grid_html.find(id='item-grid')
@@ -574,16 +581,49 @@ def get_item():
                 thread.join()
             log_status('\n')
 
-            break
+            #break
     temp = info.copy()
+
+    stat_list = set()
+    for section in temp:
+        for item in temp[section]:
+            try:
+                for stat_type in temp[section][item]['stats']:
+                    if stat_type == 'bonus health':
+                        pass
+                    stat_list.add(stat_type)
+            except KeyError:
+                pass
+    """
+ability power
+armor
+attack damage
+attack speed
+base health regeneration
+base mana regeneration
+bonus health
+cooldown reduction
+critical strike chance
+gold per 10 seconds
+health
+health on-hit
+life steal
+magic penetration
+magic resistance
+mana
+movement speed
+spell vamp
+"""
+    for stat in stat_list:
+        print(stat)
     return
 
 
 def main():
     start_time = time.time()
     get_patch()
-    champ_list = get_champ_stat_info()
-    google_sheets(champ_list)
+    #champ_list = get_champ_stat_info()
+    #google_sheets(champ_list)
     get_item()
     end_time = time.time()
     total_time = end_time - start_time
