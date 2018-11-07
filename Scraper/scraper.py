@@ -2,124 +2,82 @@
 By: Ryan Stanbury
 To run the project run the following pip commands
 pip install --upgrade google-api-python-client oauth2client
-pip install requests
 pip install bs4
-pip install pywebcopy
-pip install pathlib
 pip install lxml
 """
 
 import os  # Detect if file directory for patch exists
-import sys  # Flush stdout to print in child process
 import threading  # Used for threading items
 import time  # Timer to test speed of program
-from contextlib import closing  # Close connection after receiving page
 from shutil import rmtree  # Delete old patch folder
 
+import urllib3  # Obtain web pages for downloading and parsing
 from bs4 import BeautifulSoup  # Parse html page
 from googleapiclient.discovery import build  # Build connection for authentication
 from googleapiclient.errors import HttpError  # Catch HttpErrors
 from httplib2 import Http  # Use Http to connect to API
 from oauth2client import file, client, tools  # Used for authentication with API
-from pywebcopy import WebPage  # Download html pages
-from requests import get  # Download html page
-from requests.exceptions import RequestException  # Get download exceptions
 
 # Global variables
 info = {}  # Start of dictionary to hold all items
 mkdir_lock = threading.Lock()  # Lock for creating directories to store web pages
 counter_lock = threading.Lock()  # Lock for limiting the number of threads
-bs4_lock = threading.Lock()
+logging_lock = threading.Lock()  # Lock for logging the status of the program
 patch = ''  # Current patch version
-cwd = ''  # Main directory to store web pages
 thread_count = 0  # Current thread count
 
 
-def get_web_page(page_name, path='', sub_path=''):
+def get_web_page(page_name, path='', sub_path='', http_pool=None):
     """
     Either fetch page from saved pages or get it from the wiki
     :return: contents of the web page
     """
 
-    global patch
-    global cwd
+    # Paths for the folder and containing file
     folder_path = ''.join([patch, path, sub_path, '/'])
     file_path = ''.join([folder_path, page_name, '_Page.html'])
 
     # Create directories if they do not already exist
     with mkdir_lock:
-        if sub_path is not '':
-            if not os.path.exists(folder_path):
+        if not os.path.exists(folder_path):
+            try:
                 os.mkdir(folder_path)
-        else:
-            if not os.path.exists(folder_path):
-                os.mkdir(folder_path)
+            except OSError:
+                log_error(''.join(['Failed to create directory for path: ', folder_path]))
 
     # Try to open downloaded Item page
     try:
+        # Check the file size and raise not found error if the page was not downloaded correctly
         if os.stat(file_path).st_size == 0:
             os.remove(file_path)
             raise FileNotFoundError
 
-        with open(file_path) as web_page:
+        # Open the file using encoding
+        with open(file=file_path, mode='r', encoding='utf-8') as web_page:
             main_url = web_page.read()
 
         return main_url
 
     # If correct patch item page is not found, generate a new one
     except FileNotFoundError:
+        # Log status of current page being downloaded
+        log_status(''.join(['Downloading HTML page for: ', page_name]))
+
         # Create/close item page html file
-        with open(file_path, 'w') as web_page:
-            # Use pywebcopy to obtain web page with encoding and save to file
-            web_page_copy = WebPage(
-                url=''.join(['http://leagueoflegends.wikia.com/wiki/', page_name]),
-                project_folder=cwd,
-            ).encode('ascii')
-            web_page.write(web_page_copy.decode('utf-8'))
+        with open(file=file_path, mode='w', encoding='utf-8') as web_page:
+            web_url = ''.join(['http://leagueoflegends.wikia.com/wiki/', page_name.replace(' ', '_')])
+
+            # Use urllib3 pool for speed and built in threading handling
+            response = http_pool.request(method='GET', url=web_url)
+
+            # Ignore characters that are not in utf-8 as they are not needed
+            web_page.write(response.data.decode('utf-8', 'ignore'))
 
         # Open and read newly created file
-        with open(file_path, 'r') as web_page:
+        with open(file=file_path, mode='r', encoding='utf-8') as web_page:
             main_url = web_page.read()
 
         return main_url
-
-
-def get_url(url):
-    """
-    Send GET request to url and return HTML/XML if it exists,
-    if not return None.
-    :param url: url to download
-    :return: return page if successful
-    """
-
-    try:
-        # Get response from server
-        with closing(get(url, stream=True)) as resp:
-            # Return content if successful
-            if got_response(resp):
-                return resp.content
-            else:
-                return None
-
-    # Print error message on failure
-    except RequestException as e:
-        log_error('Did not get response from request to {0} : {1}'.format(url, str(e)))
-        return None
-
-
-def got_response(resp):
-    """
-    Return true if response was HTML/XML
-    :param resp: get response from website
-    :return: return html page
-    """
-
-    # Get the type of page (wanting HTML)
-    content_type = resp.headers['Content-Type'].lower()
-    # Return page contents
-    return (resp.status_code == 200
-            and content_type is not None
-            and content_type.find('html') > -1)
 
 
 def log_error(e):
@@ -140,7 +98,8 @@ def log_status(status):
     :return:
     """
 
-    print(status)
+    with logging_lock:
+        print(status)
 
 
 def get_patch():
@@ -150,15 +109,21 @@ def get_patch():
     """
 
     global patch
-    global cwd
 
-    # Get the current patch number
-    main_url = get_url('http://leagueoflegends.wikia.com/wiki/League_of_Legends_Wiki')
-    with bs4_lock:
-        patch_html = BeautifulSoup(main_url, 'lxml')
+    # Url to parse for current patch
+    home_url = 'http://leagueoflegends.wikia.com/wiki/League_of_Legends_Wiki'
+
+    # Create a pool and download the requested url
+    http_pool = urllib3.PoolManager()
+    main_url = http_pool.request(method='GET', url=home_url).data.decode('utf-8', 'ignore')
+
+    # Parse page and look for patch version
+    patch_html = BeautifulSoup(markup=main_url, features='lxml')
     current_patch_html = patch_html.find(id='navigation')
     patch = current_patch_html.contents[55].contents[2].text.split(' ', 1)[1]
-    path = 'leagueoflegends.wikia.com/'
+
+    # Local patch to hold saved web pages
+    path = 'HTML Pages/'
 
     # Create main folder if not already existing
     if not os.path.isdir(path):
@@ -170,23 +135,23 @@ def get_patch():
     # Detect if current patch is a new patch
     if not os.path.isdir(''.join([path, patch])):
         try:
+            # Remove old saved pages and create folder for new patch
             rmtree(path)
             os.mkdir(path)
             os.mkdir(''.join([path, patch]))
         except OSError:
             log_error(''.join(['Failed to create directory for patch: ', os.getcwd(), path, patch]))
 
-    # Grab current directory for pywebcopy and change path to write files
-    cwd = os.getcwd()
+    # Change path to write files
     os.chdir(path)
 
 
-def push_to_sheets(request, typeofrequest, rangeofupdate="none", champ=""):
+def push_to_sheets(request, type_of_request, range_of_update="none", champ=""):
     """
     Put data collected onto spreadsheet for calculations
     :param request: data to be inserted on sheet
-    :param typeofrequest: create page (0), or update cell (1)
-    :param rangeofupdate: cell range to update
+    :param type_of_request: create page (0), or update cell (1)
+    :param range_of_update: cell range to update
     :param champ: champion being modified
     :return:
     """
@@ -206,16 +171,16 @@ def push_to_sheets(request, typeofrequest, rangeofupdate="none", champ=""):
     # Attempt to update sheet with changes
     try:
         # Create new sheet
-        if typeofrequest == 0:
+        if type_of_request == 0:
             service.spreadsheets().batchUpdate(
                 spreadsheetId=sheet_id,
                 body=request).execute()
         # Update cells on sheet
-        elif typeofrequest == 1:
+        elif type_of_request == 1:
             service.spreadsheets().values().update(
                 spreadsheetId=sheet_id,
                 body=request,
-                range=rangeofupdate,
+                range=range_of_update,
                 valueInputOption="USER_ENTERED").execute()
 
     # Catch error on changes and print error message
@@ -260,8 +225,7 @@ def get_champ_stat_info():
     main_url = get_web_page('League_of_Legends_Wiki')
 
     # Parse the HTML page for champion names
-    with bs4_lock:
-        champions_html = BeautifulSoup(main_url, 'lxml')
+    champions_html = BeautifulSoup(markup=main_url, features='lxml')
     champ_roster_ol = champions_html.find(class_="champion_roster")
     champ_roster_li = champ_roster_ol.find_all('a')
 
@@ -281,8 +245,7 @@ def get_champ_stat_info():
 
         # Open champion page
         main_url = get_web_page(champ[6:].replace('%27', '\'').replace('_', ' '), '/Champions/')
-        with bs4_lock:
-            champions_html = BeautifulSoup(main_url, 'lxml')
+        champions_html = BeautifulSoup(markup=main_url, features='lxml')
 
         # Append stats to array
         for stat in stat_type:
@@ -391,21 +354,55 @@ def google_sheets(champ_list):
                 push_to_sheets(request, 0)
 
 
-def get_item_page(section, cnt, finished_items_html, category):
+def get_item_page(item, cnt, finished_items_html, category, http_pool):
+    """
+    Retrieve information for the current item and pass it on for processing
+    :param item: BS4 object for item being processed
+    :param cnt: Item number within the current section
+    :param finished_items_html: BS4 object to obtain current section
+    :param category: Section of item being processes
+    :param http_pool: Pool for urllib3 requests
+    :return:
+    """
+
     global thread_count
-    item_name = section.contents[0].contents[0].contents[0].get('href')
+
+    # Get item directory and name
+    item_name = item.contents[0].contents[0].contents[0].get('href')
     saved_item_name = item_name[6:].replace('%27', '\'').replace('_', ' ')
-    item_grid_html = get_web_page(saved_item_name, '/Items/', category)
-    with bs4_lock:
-        item_html = BeautifulSoup(item_grid_html, 'lxml')
-    get_item_info(item_name, cnt, finished_items_html, item_html)
+
+    # Retrieve the html page for the current item
+    item_grid_html = get_web_page(page_name=saved_item_name,
+                                  path='/Items/',
+                                  sub_path=category,
+                                  http_pool=http_pool)
+
+    # Parse current item html page and process the information
+    item_html = BeautifulSoup(item_grid_html, 'lxml')
+    get_item_info(item_name=item_name,
+                  cnt=cnt,
+                  finished_items_html=finished_items_html,
+                  item_html=item_html)
+
+    # Signal current thread is done processing
     with counter_lock:
         thread_count -= 1
 
 
 def get_item_info(item_name, cnt, finished_items_html, item_html):
+    """
+    Process current item html page and add information to global dictionary
+    :param item_name: Item path for current item
+    :param cnt: Item number within the current section
+    :param finished_items_html: URL of item being processed
+    :param item_html:
+    :return:
+    """
+
     # Get info for dictionary entry
     global info
+
+    # Get readable item name and section
     name = item_name[6:].replace('%27', '\'').replace('_', ' ')
     item_section = finished_items_html.contents[cnt - 2].text.strip()
 
@@ -420,21 +417,29 @@ def get_item_info(item_name, cnt, finished_items_html, item_html):
     except AttributeError:
         return
 
+    # Create local dict to not constantly call global, used to improve speed
     current_info = {}
 
     # Get all information about the current item
     try:
-        for section in item_list:
+        # Search through each section in the item info box
+        for info_box_section in item_list:
             try:
-                section_name = section.contents[0].text.strip()
-                if section_name == 'Stats':
-                    current_info = get_stats(section, current_info)
-                elif section_name == 'Passive':
-                    current_info = get_passive(section, current_info)
-                elif section_name[:12] == 'Availability':
-                    current_info = get_map(section, current_info)
-                elif section_name[:4] == 'Cost':
-                    cost = section.contents[0].contents[3].contents[1].contents[1].text
+                # Retrieve current section name in item box
+                info_box_section_name = info_box_section.contents[0].text.strip()
+
+                # Conduct appropriate parsing depending on current section name
+                if info_box_section_name == 'Stats':
+                    current_info = get_stats(info_box_section_name=info_box_section,
+                                             current_info=current_info)
+                elif info_box_section_name == 'Passive':
+                    current_info = get_passive(info_box_section_name=info_box_section,
+                                               current_info=current_info)
+                elif info_box_section_name[:12] == 'Availability':
+                    current_info = get_map(info_box_section_name=info_box_section,
+                                           current_info=current_info)
+                elif info_box_section_name[:4] == 'Cost':
+                    cost = info_box_section.contents[0].contents[3].contents[1].contents[1].text
                     current_info['cost'] = cost
             except AttributeError:
                 pass
@@ -443,27 +448,41 @@ def get_item_info(item_name, cnt, finished_items_html, item_html):
     except TypeError:
         return
 
+    # Log status of job complete and add local dictionary to global dictionary
     log_status(''.join(['Item completed: ', name]))
-    sys.stdout.flush()
     info[item_section][name] = current_info
     return
 
 
-def get_stats(section, current_info):
+def get_stats(info_box_section_name, current_info):
+    """
+    Parse the stats for current item
+    :param info_box_section_name: Current section of the info box to parse
+    :param current_info: Local dictionary
+    :return:
+    """
+
+    # Create entry in local dictionary for stats section
     current_info['stats'] = {}
 
     # Loop through each stat row
     try:
-        for part, item in enumerate(section):
+        for part, item in enumerate(info_box_section_name):
+            # Skip filler from HTML page
             if part % 2 == 0 and part != 0:
+                # Check if stat is being added (will raise error if otherwise and will then be skipped)
                 if item.text.strip()[0] == "+":
+                    # Get number value for current stat being added
                     stat_amount = item.text.strip().split(' ', 1)[0][1:]
 
+                    # If stat_amount is not a number, the stat is adding gold instead
                     if stat_amount != '':
                         type_of_stat = item.text.strip().split(' ', 1)[1]
                     else:
                         stat_amount = item.text.strip().split(' ', 2)[1]
                         type_of_stat = ''.join(['gold ', item.text.strip().split(' ', 2)[2]])
+
+                    # Add stat info to local dictionary
                     current_info['stats'][type_of_stat] = stat_amount
     except AttributeError:
         pass
@@ -471,21 +490,37 @@ def get_stats(section, current_info):
     return current_info
 
 
-def get_passive(section, current_info):
-    global info
+def get_passive(info_box_section_name, current_info):
+    """
+    Parse the passive for current item
+    :param info_box_section_name: Current section of the info box to parse
+    :param current_info: Local dictionary
+    :return:
+    """
+
+    # Create entry in local dictionary for passive section
     current_info['passive'] = {}
 
     # Loop though each passive row
     try:
-        for part, item in enumerate(section):
+        for part, item in enumerate(info_box_section_name):
+            # Skip through filler from HTML page
             if part % 2 == 0 and part != 0:
                 passive = item.text.strip()
+
+                # Check if double space is present (if so that means gold is part of the passive
                 if passive.find('  ') == -1:
+                    # Add passive info to local dictionary
                     current_info['passive'][part // 2] = item.text.strip()
                 else:
+                    # Replace double space with gold
                     passive_edit = passive.replace('  +', ' gold +')
+
+                    # Further check to verify gold is being added as other items have double space (e.g. Seraph's)
                     if passive == passive_edit:
                         passive_edit = passive.replace('  ', ' ')
+
+                    # Add passive info to local dictionary
                     current_info['passive'][part // 2] = passive_edit
 
     except AttributeError:
@@ -494,18 +529,32 @@ def get_passive(section, current_info):
     return current_info
 
 
-def get_map(section, current_info):
-    global info
+def get_map(info_box_section_name, current_info):
+    """
+    Parse the map for current item
+    :param info_box_section_name: Current section of the info box to parse
+    :param current_info: Local dictionary
+    :return:
+    """
+
+    # Create entry in local dictionary for map section
     current_info['map'] = {}
 
-    for cnt, map_section in enumerate(section.contents[0].contents[5].contents[1]):
+    # Loop though section for individual maps
+    for cnt, map_section in enumerate(info_box_section_name.contents[0].contents[5].contents[1]):
+        # Skip filler from HTML page
         if cnt % 2 == 0:
             continue
 
-        map_name = section.contents[0].contents[3].contents[1].contents[cnt].text
+        # Obtain current map abbreviation (2 characters long)
+        map_name = info_box_section_name.contents[0].contents[3].contents[1].contents[cnt].text
+
+        # Check if the current map uses the item or not
         if map_section.contents[0].contents[0].get('alt') == 'Done':
+            # Add map info to local dictionary
             current_info['map'][map_name] = 'yes'
         else:
+            # Add map info to local dictionary
             current_info['map'][map_name] = 'no'
 
     return current_info
@@ -517,122 +566,154 @@ def get_item():
     :return: item information
     """
 
-    # Start of dictionary to hold all items
     global info
     global patch
     global thread_count
 
-    main_url = get_web_page('Item', '/Items')
+    # Log current status of program
+    log_status('Getting Item Grid')
+
+    # Create urllib3 pool to download each web page
+    http_pool = urllib3.PoolManager()
+    main_url = get_web_page(page_name='Item', path='/Items', http_pool=http_pool)
+
+    # For formatting
+    log_status('\n')
 
     # Use the item page and set up parsing
-    with bs4_lock:
-        item_grid_html = BeautifulSoup(main_url, 'lxml')
+    item_grid_html = BeautifulSoup(markup=main_url, features='lxml')
 
     # Find the item grid and start to parse
     finished_items_html = item_grid_html.find(id='item-grid')
-    sections = finished_items_html.contents
 
-    for cnt, null in enumerate(sections):
+    # Loop through item grid for each item section
+    for cnt, null in enumerate(finished_items_html.contents):
 
         # Add section to dictionary
         if cnt % 4 == 1:
+            # Save current section being worked on
             category = finished_items_html.contents[cnt].text.strip()
 
+            # Skip sections not used by calculator
             if category == 'Potions and Consumables' or \
                category == 'Distributed' or \
                category == 'Removed items' or \
                category == 'Trinkets':
                 continue
 
+            # Log status of program
             log_status(''.join(['Starting Section: ', finished_items_html.contents[cnt].text.strip()]))
-            sys.stdout.flush()
+
+            # Create entry for current section in global dictionary
             info[finished_items_html.contents[cnt].text.strip()] = {}
 
-        # Go to each item's page
+        # Search though section for items
         if cnt % 4 == 3:
+            # Save current section being worked on
             category = finished_items_html.contents[cnt - 2].text.strip()
 
+            # Skip sections not used by calculator
             if category == 'Potions and Consumables' or \
                category == 'Distributed' or \
                category == 'Removed items' or \
                category == 'Trinkets':
                 continue
 
+            # Array to hold threads
             all_item_threads = []
 
             # Get the page for each item in the category and start to parse
-            for section in finished_items_html.contents[cnt]:
-                item_name = section.contents[0].contents[0].contents[0].get('href')
+            for item in finished_items_html.contents[cnt]:
+                # Save item path and readable names
+                item_name = item.contents[0].contents[0].contents[0].get('href')
                 current_item_name = item_name[6:].replace('%27', '\'').replace('_', ' ')
 
+                # Create thread for each item being parsed
                 while True:
-                    if thread_count < len(finished_items_html):
-                        # Get information about item
+                    # Only create a thread if limit has not been exceeded
+                    if thread_count < len(finished_items_html) / 2:
+                        # Create thread and process each item
                         thread = threading.Thread(target=get_item_page,
-                                                  args=(section, cnt, finished_items_html, category),
+                                                  args=(item, cnt, finished_items_html, category, http_pool),
                                                   name=current_item_name)
+
+                        # Append current thread to list and start thread
                         all_item_threads.append(thread)
                         thread.start()
+
+                        # Signal a new thread is being created
                         with counter_lock:
                             thread_count += 1
+
+                        # Exit loop once processing is done
                         break
 
+                    # Wait if a thread queue is full
+                    time.sleep(2)
+
+            # Wait for all threads to finish processing
             for thread in all_item_threads:
                 thread.join()
+
+            # For formatting
             log_status('\n')
 
+            #FOR DEBUGGING, STOP AFTER FIRST SECTION
             #break
+    # FOR DEBUGGING, CREATE LOCAL COPY AS GOLBAL VARIABLE DO NOT SHOW UP IN THE DEBUGGER
     temp = info.copy()
 
-    stat_list = set()
-    for section in temp:
-        for item in temp[section]:
-            try:
-                for stat_type in temp[section][item]['stats']:
-                    if stat_type == 'bonus health':
-                        pass
-                    stat_list.add(stat_type)
-            except KeyError:
-                pass
+    #PLACEOLDER, EACH ITEM STAT NEEDED ON EXCEL SHEET
     """
-ability power
-armor
-attack damage
-attack speed
-base health regeneration
-base mana regeneration
-bonus health
-cooldown reduction
-critical strike chance
-gold per 10 seconds
-health
-health on-hit
-life steal
-magic penetration
-magic resistance
-mana
-movement speed
-spell vamp
-"""
-    for stat in stat_list:
-        print(stat)
+    ability power
+    armor
+    attack damage
+    attack speed
+    base health regeneration
+    base mana regeneration
+    bonus health
+    cooldown reduction
+    critical strike chance
+    gold per 10 seconds
+    health
+    health on-hit
+    life steal
+    magic penetration
+    magic resistance
+    mana
+    movement speed
+    spell vamp
+    """
     return
 
 
 def main():
+    # Start time of program
     start_time = time.time()
+
+    # Get current patch
     get_patch()
+
+    # Processes stat for each champion
     #champ_list = get_champ_stat_info()
     #google_sheets(champ_list)
+
+    # Process all item information
     get_item()
+
+    # End time of program
     end_time = time.time()
+
+    # Formatting
     total_time = end_time - start_time
     minutes = round(total_time / 60)
     seconds = round(total_time % 60)
     if seconds > 10:
+        # Log the duration of the program
         log_status('M:S')
         log_status(''.join([str(minutes), ':', str(seconds)]))
     else:
+        # Log the duration of the program
         log_status('M:S')
         log_status(''.join([str(minutes), ':0', str(seconds)]))
 
