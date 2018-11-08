@@ -19,7 +19,8 @@ from httplib2 import Http  # Use Http to connect to API
 from oauth2client import file, client, tools  # Used for authentication with API
 
 # Global variables
-info = {}  # Start of dictionary to hold all items
+item_info = {}  # Start of dictionary to hold all items
+home_directory = ''  # Home directory of project
 mkdir_lock = threading.Lock()  # Lock for creating directories to store web pages
 counter_lock = threading.Lock()  # Lock for limiting the number of threads
 logging_lock = threading.Lock()  # Lock for logging the status of the program
@@ -109,6 +110,7 @@ def get_patch():
     """
 
     global patch
+    global home_directory
 
     # Url to parse for current patch
     home_url = 'http://leagueoflegends.wikia.com/wiki/League_of_Legends_Wiki'
@@ -121,6 +123,9 @@ def get_patch():
     patch_html = BeautifulSoup(markup=main_url, features='lxml')
     current_patch_html = patch_html.find(id='navigation')
     patch = current_patch_html.contents[55].contents[2].text.split(' ', 1)[1]
+
+    # Grab home directory for project
+    home_directory = os.getcwd()
 
     # Local patch to hold saved web pages
     path = 'HTML Pages/'
@@ -146,19 +151,22 @@ def get_patch():
     os.chdir(path)
 
 
-def push_to_sheets(request, type_of_request, range_of_update="none", champ=""):
+def push_to_sheets(request, type_of_request, range_of_update="none", object_updating=""):
     """
     Put data collected onto spreadsheet for calculations
     :param request: data to be inserted on sheet
     :param type_of_request: create page (0), or update cell (1)
     :param range_of_update: cell range to update
-    :param champ: champion being modified
+    :param object_updating: object being modified
     :return:
     """
 
-    os.chdir('..')
+    global home_directory
 
-    # This section connects to the Google Sheets API and is copied from their tutorial
+    # Set current directory to project's home directory
+    os.chdir(home_directory)
+
+    # This section connects to the Google Sheets API and is mostly copied from their tutorial
     sheet_id = '1ercODhUtMmEjI4230hZwXBOa-V7yPquwzuNjkJ98Ux4'
     scopes = 'https://www.googleapis.com/auth/spreadsheets'
     store = file.Storage('storage.json')
@@ -194,13 +202,11 @@ def push_to_sheets(request, type_of_request, range_of_update="none", champ=""):
 
         # Display creating sheet for champion if said sheet does not exist
         if error[message[0] + 1:message[0] + 23] == "Unable to parse range:":
-            log_error("Creating new page for " + champ)
+            log_error("Creating new page for " + object_updating)
             return "newPage"
         # Log error message (not including type of error)
         else:
             log_error(error[message[0] + 1:message[message.__len__() - 1]])
-
-    os.chdir('leagueoflegends.wikia.com')
 
     return "pass"
 
@@ -222,7 +228,10 @@ def get_champ_stat_info():
                  "MovementSpeed"]
     champ_list = [[], []]  # Champion Names with stats
     champ_url = []  # Each champion wiki page
-    main_url = get_web_page('League_of_Legends_Wiki')
+
+    # Fetch main wiki page
+    http_pool = urllib3.PoolManager()
+    main_url = get_web_page(page_name='League_of_Legends_Wiki', http_pool=http_pool)
 
     # Parse the HTML page for champion names
     champions_html = BeautifulSoup(markup=main_url, features='lxml')
@@ -244,7 +253,9 @@ def get_champ_stat_info():
         champ_stats = []  # Hold the stats for a champion
 
         # Open champion page
-        main_url = get_web_page(champ[6:].replace('%27', '\'').replace('_', ' '), '/Champions/')
+        main_url = get_web_page(page_name=champ[6:].replace('%27', '\'').replace('_', ' '),
+                                path='/Champions/',
+                                http_pool=http_pool)
         champions_html = BeautifulSoup(markup=main_url, features='lxml')
 
         # Append stats to array
@@ -289,10 +300,12 @@ def get_champ_stat_info():
 
         log_status(champ[6:])
 
+    # Formatting
+    log_status('\n')
     return champ_list
 
 
-def google_sheets(champ_list):
+def champ_google_sheets(champ_list):
     """
     Prepare data to insert to google sheets API
     :param champ_list: double array of each champion and their stats
@@ -304,7 +317,7 @@ def google_sheets(champ_list):
                     'Ahri']
 
     # Update champion stats and create new page if needed
-    for cnt, champ in enumerate(sheet_ranges):  # REPLACE WITH CHAMP_LIST ONCE FINISHED
+    for cnt, champ in enumerate(sheet_ranges):  #REPLACE WITH CHAMP_LIST ONCE FINISHED
         status = ""  # Status of update
         while status != "pass":  # Try again if the update does not pass
             request = {  # Dictionary to hold updates
@@ -337,7 +350,10 @@ def google_sheets(champ_list):
                 ]
             }
             # Try and update sheet and get return status
-            status = push_to_sheets(request, 1, ''.join([champ, "!A2:N3"]), champ=champ)
+            status = push_to_sheets(request=request,
+                                    type_of_request=1,
+                                    range_of_update=''.join([champ, "!A2:N3"]),
+                                    object_updating=champ)
 
             # If a new page is needed create one for the champion
             if status == "newPage":
@@ -351,7 +367,133 @@ def google_sheets(champ_list):
                     }
                 }
                 # Create new page for the current champion
-                push_to_sheets(request, 0)
+                push_to_sheets(request=request,
+                               type_of_request=0)
+
+
+def item_switch_case(column):
+    switch_case = {
+        'name': 0,
+        'ability power': 1,
+        'armor': 2,
+        'attack damage': 3,
+        'attack speed': 4,
+        'base health regeneration': 5,
+        'base mana regeneration': 6,
+        'bonus health': 7,
+        'cooldown reduction': 8,
+        'critical strike chance': 9,
+        'gold per 10 seconds': 10,
+        'health': 11,
+        'health on-hit': 12,
+        'life steal': 13,
+        'magic penetration': 14,
+        'magic resistance': 15,
+        'mana': 16,
+        'movement speed': 17,
+        'spell vamp': 18,
+        'category': 19,
+        'SR': 20,
+        'TT': 21,
+        'HA': 22,
+        'NB': 23,
+        1: 24,  # Passive
+        2: 25,  # Passive
+        3: 26,  # Passive
+        4: 27,  # Passive
+        'cost': 28
+    }
+
+    return switch_case.get(column, 'Invalid Column')
+
+
+def item_google_sheets():
+    """
+    Prepare item data to insert into google sheets API
+    :return:
+    """
+
+    # Create local copy of item dict for speed purposes
+    global item_info
+    all_item_info = item_info.copy()
+
+    all_item_rows = []
+
+    for category in all_item_info:
+        for item in all_item_info[category]:
+            # Dictionary to hold info for the current item row
+            item_row = [
+                '',  # 0 name
+                '',  # 1 ability power
+                '',  # 2 armor
+                '',  # 3 attack damage
+                '',  # 4 attack speed
+                '',  # 5 base health regeneration
+                '',  # 6 base mana regeneration
+                '',  # 7 bonus health
+                '',  # 8 cooldown reduction
+                '',  # 9 critical strike chance
+                '',  # 10 gold per 10 seconds
+                '',  # 11 health
+                '',  # 12 health on-hit
+                '',  # 13 life steal
+                '',  # 14 magic penetration
+                '',  # 15 magic resistance
+                '',  # 16 mana
+                '',  # 17 movement speed
+                '',  # 18 spell vamp
+                '',  # 19 category
+                '',  # 20 SR
+                '',  # 21 TT
+                '',  # 22 HA
+                '',  # 23 NB
+                '',  # 24 passive 1
+                '',  # 25 passive 2
+                '',  # 26 passive 3
+                '',  # 27 passive 4
+                ''  # 28 cost
+            ]
+
+            item_row[0] = item
+
+            for info in all_item_info[category][item]:
+                if info == 'cost':
+                    array_position = item_switch_case(info)
+                    item_row[array_position] = all_item_info[category][item][info]
+                else:
+                    for info_section in all_item_info[category][item][info]:
+                        array_position = item_switch_case(info_section)
+                        item_row[array_position] = all_item_info[category][item][info][info_section].replace('+', '')
+
+            all_item_rows.append(item_row)
+    all_item_rows = sorted(all_item_rows)
+
+    request = {
+        'values': all_item_rows
+    }
+
+    status = ''
+    while status != 'pass':
+        status = push_to_sheets(request=request,
+                                type_of_request=1,
+                                range_of_update=''.join(['Items', '!A2:AC', str(len(all_item_rows) + 1)]),
+                                object_updating='Items')
+
+        if status == "newPage":
+            request = {
+                "requests": {
+                    "addSheet": {
+                        "properties": {
+                            "title": 'Items'
+                        }
+                    }
+                }
+            }
+            # Create new page for the current champion
+            push_to_sheets(request=request,
+                           type_of_request=0)
+
+    return
 
 
 def get_item_page(item, cnt, finished_items_html, category, http_pool):
@@ -400,7 +542,7 @@ def get_item_info(item_name, cnt, finished_items_html, item_html):
     """
 
     # Get info for dictionary entry
-    global info
+    global item_info
 
     # Get readable item name and section
     name = item_name[6:].replace('%27', '\'').replace('_', ' ')
@@ -450,7 +592,7 @@ def get_item_info(item_name, cnt, finished_items_html, item_html):
 
     # Log status of job complete and add local dictionary to global dictionary
     log_status(''.join(['Item completed: ', name]))
-    info[item_section][name] = current_info
+    item_info[item_section][name] = current_info
     return
 
 
@@ -566,12 +708,15 @@ def get_item():
     :return: item information
     """
 
-    global info
+    global item_info
     global patch
     global thread_count
 
     # Log current status of program
     log_status('Getting Item Grid')
+
+    # Change directory to HTML pages
+    os.chdir(''.join([home_directory, '/HTML Pages']))
 
     # Create urllib3 pool to download each web page
     http_pool = urllib3.PoolManager()
@@ -605,7 +750,7 @@ def get_item():
             log_status(''.join(['Starting Section: ', finished_items_html.contents[cnt].text.strip()]))
 
             # Create entry for current section in global dictionary
-            info[finished_items_html.contents[cnt].text.strip()] = {}
+            item_info[finished_items_html.contents[cnt].text.strip()] = {}
 
         # Search though section for items
         if cnt % 4 == 3:
@@ -661,29 +806,7 @@ def get_item():
             #FOR DEBUGGING, STOP AFTER FIRST SECTION
             #break
     # FOR DEBUGGING, CREATE LOCAL COPY AS GOLBAL VARIABLE DO NOT SHOW UP IN THE DEBUGGER
-    temp = info.copy()
-
-    #PLACEOLDER, EACH ITEM STAT NEEDED ON EXCEL SHEET
-    """
-    ability power
-    armor
-    attack damage
-    attack speed
-    base health regeneration
-    base mana regeneration
-    bonus health
-    cooldown reduction
-    critical strike chance
-    gold per 10 seconds
-    health
-    health on-hit
-    life steal
-    magic penetration
-    magic resistance
-    mana
-    movement speed
-    spell vamp
-    """
+    temp = item_info.copy()
     return
 
 
@@ -695,11 +818,12 @@ def main():
     get_patch()
 
     # Processes stat for each champion
-    #champ_list = get_champ_stat_info()
-    #google_sheets(champ_list)
+    # champ_list = get_champ_stat_info()
+    # champ_google_sheets(champ_list)
 
     # Process all item information
     get_item()
+    item_google_sheets()
 
     # End time of program
     end_time = time.time()
