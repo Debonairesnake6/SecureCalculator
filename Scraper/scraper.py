@@ -151,13 +151,13 @@ def get_patch():
     os.chdir(path)
 
 
-def push_to_sheets(request, type_of_request, range_of_update="none", object_updating=""):
+def push_to_sheets(request, type_of_request, range_of_update="none", page_updating=""):
     """
     Put data collected onto spreadsheet for calculations
     :param request: data to be inserted on sheet
     :param type_of_request: create page (0), or update cell (1)
     :param range_of_update: cell range to update
-    :param object_updating: object being modified
+    :param page_updating: object being modified
     :return:
     """
 
@@ -192,21 +192,21 @@ def push_to_sheets(request, type_of_request, range_of_update="none", object_upda
                 valueInputOption="USER_ENTERED").execute()
 
     # Catch error on changes and print error message
-    except HttpError as e:
+    except HttpError as error:
         # Find position of quotation marks
-        error = str(e)
+        error_message = str(error)
         message = []
-        for pos, char in enumerate(error):
+        for pos, char in enumerate(error_message):
             if char == "\"":
                 message.append(pos)
 
         # Display creating sheet for champion if said sheet does not exist
-        if error[message[0] + 1:message[0] + 23] == "Unable to parse range:":
-            log_error("Creating new page for " + object_updating)
+        if error_message[message[0] + 1:message[0] + 23] == "Unable to parse range:":
+            log_error("Creating new page for " + page_updating)
             return "newPage"
         # Log error message (not including type of error)
         else:
-            log_error(error[message[0] + 1:message[message.__len__() - 1]])
+            log_error(error_message[message[0] + 1:message[message.__len__() - 1]])
 
     return "pass"
 
@@ -353,7 +353,7 @@ def champ_google_sheets(champ_list):
             status = push_to_sheets(request=request,
                                     type_of_request=1,
                                     range_of_update=''.join([champ, "!A2:N3"]),
-                                    object_updating=champ)
+                                    page_updating=champ)
 
             # If a new page is needed create one for the champion
             if status == "newPage":
@@ -372,6 +372,13 @@ def champ_google_sheets(champ_list):
 
 
 def item_switch_case(column):
+    """
+    Dictionary to return value a stat should be placed in the array
+    :param column: stat to place in array
+    :return: position of stat in array
+    """
+
+    # Array holding each stats and their location
     switch_case = {
         'name': 0,
         'ability power': 1,
@@ -404,6 +411,7 @@ def item_switch_case(column):
         'cost': 28
     }
 
+    # Return Invalid Column if value not found
     return switch_case.get(column, 'Invalid Column')
 
 
@@ -463,7 +471,12 @@ def item_google_sheets():
                 else:
                     for info_section in all_item_info[category][item][info]:
                         array_position = item_switch_case(info_section)
-                        item_row[array_position] = all_item_info[category][item][info][info_section].replace('+', '')
+                        try:
+                            item_row[array_position] = all_item_info[category][item][info][info_section].replace('+', '')
+
+                        # If the stat is not being used by the calculator then skip (e.g. lifesteal vs monsters)
+                        except TypeError:
+                            pass
 
             all_item_rows.append(item_row)
     all_item_rows = sorted(all_item_rows)
@@ -477,10 +490,10 @@ def item_google_sheets():
         status = push_to_sheets(request=request,
                                 type_of_request=1,
                                 range_of_update=''.join(['Items', '!A2:AC', str(len(all_item_rows) + 1)]),
-                                object_updating='Items')
+                                page_updating='Items')
 
         if status == "newPage":
-            request = {
+            new_page = {
                 "requests": {
                     "addSheet": {
                         "properties": {
@@ -490,8 +503,20 @@ def item_google_sheets():
                 }
             }
             # Create new page for the current champion
-            push_to_sheets(request=request,
+            push_to_sheets(request=new_page,
                            type_of_request=0)
+
+            titles = {
+                'values': [['name', 'ability power', 'armor', 'attack damage', 'attack speed', 'base health regeneration',
+                            'base mana regeneration', 'bonus health', 'cooldown reduction', 'critical strike chance',
+                            'gold per 10 seconds', 'health', 'health on-hit', 'life steal', 'magic penetration',
+                            'magic resistance', 'mana', 'movement speed', 'spell vamp', 'category', 'SR', 'TT', 'HA', 'NB',
+                            'Passive 1', 'Passive 2', 'Passive 3', 'Passive 4', 'cost']]
+            }
+            push_to_sheets(request=titles,
+                           type_of_request=1,
+                           range_of_update='Items!A1:AC1',
+                           page_updating='Items')
 
     return
 
