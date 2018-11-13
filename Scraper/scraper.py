@@ -532,7 +532,51 @@ def item_google_sheets():
                                 range_of_update=''.join(['Items', '!A2:AC', str(len(all_item_rows) + 1)]),
                                 page_updating='Items')
 
-        # If the Items page does not exist, create it
+        if status == 'pass':
+
+            # Get sheet numerical sheet ID
+            item_build_id = push_to_sheets(type_of_request=2)
+            item_sheet_id = ''
+            if item_build_id != 'pass' or \
+                    item_build_id != 'newPage':
+                for sheet in item_build_id.get('sheets'):
+                    if sheet['properties'].get('title') == 'Items':
+                        item_sheet_id = sheet['properties'].get('sheetId')
+                        continue
+
+            resize = {
+                'requests': [
+                    {
+                        'autoResizeDimensions': {
+                            'dimensions': {
+                                'sheetId': item_sheet_id,
+                                'dimension': 'COLUMNS',
+                                'startIndex': 0,
+                                'endIndex': 29
+                            }
+                        }
+                    },
+                    {
+                        'updateDimensionProperties': {
+                            'range': {
+                                'sheetId': item_sheet_id,
+                                'dimension': 'COLUMNS',
+                                'startIndex': 24,
+                                'endIndex': 28
+                            },
+                            'properties': {
+                                'pixelSize': 500
+                            },
+                            'fields': 'pixelSize'
+                        }
+                    }
+            ]
+            }
+
+            status = push_to_sheets(request=resize,
+                                    type_of_request=0)
+
+            # If the Items page does not exist, create it
         if status == "newPage":
             new_page = {
                 "requests": {
@@ -550,10 +594,8 @@ def item_google_sheets():
 
             # Dictionary to hold the titles for the Items page
             titles = {
-                'values': [['name', 'ability power', 'armor', 'attack damage', 'attack speed',
-                            'base health regeneration', 'base mana regeneration', 'bonus health', 'cooldown reduction',
-                            'critical strike chance', 'gold per 10 seconds', 'health', 'health on-hit', 'life steal',
-                            'magic penetration', 'magic resistance', 'mana', 'movement speed', 'spell vamp', 'category',
+                'values': [['name', 'AP', 'AR', 'AD', 'AS', 'Base HPRgn', 'Base MPRgn', 'Bonus HP', 'CDR', 'Crit',
+                            'Gp/10', 'HP', 'HP On-Hit', 'LifeStl', 'Mpen', 'MR', 'MP', 'MS', 'SpellVmp', 'category',
                             'SR', 'TT', 'HA', 'NB', 'Passive 1', 'Passive 2', 'Passive 3', 'Passive 4', 'cost']]
             }
 
@@ -579,24 +621,22 @@ def item_build_sheets():
     # Initial dictionary to update static values on the sheet
     request = {
         'values': [
-            ['Item 1', '', '', 'Instructions:'],
-            ['Item 2', '', '', 'Enter item into the B1-B6 slots and the items totals will automatically update'],
-            ['Item 3'],
-            ['Item 4'],
-            ['Item 5'],
-            ['Item 6'],
+            ['', 'Item 1'],
+            ['', 'Item 2'],
+            ['', 'Item 3'],
+            ['', 'Item 4'],
+            ['', 'Item 5'],
+            ['', 'Item 6'],
             [],
-            ['name', 'ability power', 'armor', 'attack damage', 'attack speed', 'base health regeneration',
-             'base mana regeneration', 'bonus health', 'cooldown reduction', 'critical strike chance',
-             'gold per 10 seconds', 'health', 'health on-hit', 'life steal', 'magic penetration', 'magic resistance',
-             'mana', 'movement speed', 'spell vamp', 'category', 'SR', 'TT', 'HA', 'NB', 'Passive 1', 'Passive 2',
-             'Passive 3', 'Passive 4', 'cost'],
-            ['=FILTER(Items!$A$2:$AC$200, Items!$A$2:$A$200 = B1)'],
-            ['=FILTER(Items!$A$2:$AC$200, Items!$A$2:$A$200 = B2)'],
-            ['=FILTER(Items!$A$2:$AC$200, Items!$A$2:$A$200 = B3)'],
-            ['=FILTER(Items!$A$2:$AC$200, Items!$A$2:$A$200 = B4)'],
-            ['=FILTER(Items!$A$2:$AC$200, Items!$A$2:$A$200 = B5)'],
-            ['=FILTER(Items!$A$2:$AC$200, Items!$A$2:$A$200 = B6)'],
+            ['name', 'AP', 'AR', 'AD', 'AS', 'Base HPRgn', 'Base MPRgn', 'Bonus HP', 'CDR', 'Crit', 'Gp/10', 'HP',
+             'HP On-Hit', 'LifeStl', 'Mpen', 'MR', 'MP', 'MS', 'SpellVmp', 'category', 'SR', 'TT', 'HA', 'NB',
+             'Passive 1', 'Passive 2', 'Passive 3', 'Passive 4', 'cost'],
+            ['=FILTER(Items!$A$2:$AC$200, Items!$A$2:$A$200 = A1)'],
+            ['=FILTER(Items!$A$2:$AC$200, Items!$A$2:$A$200 = A2)'],
+            ['=FILTER(Items!$A$2:$AC$200, Items!$A$2:$A$200 = A3)'],
+            ['=FILTER(Items!$A$2:$AC$200, Items!$A$2:$A$200 = A4)'],
+            ['=FILTER(Items!$A$2:$AC$200, Items!$A$2:$A$200 = A5)'],
+            ['=FILTER(Items!$A$2:$AC$200, Items!$A$2:$A$200 = A6)'],
             ['Total', '=SUM(B9:B14)', '=SUM(C9:C14)', '=SUM(D9:D14)', '=SUM(E9:E14)', '=SUM(F9:F14)',
              '=SUM(G9:G14)', '=SUM(H9:H14)', '=SUM(I9:I14)', '=SUM(J9:J14)', '=SUM(K9:K14)', '=SUM(L9:L14)',
              '=SUM(M9:M14)', '=SUM(N9:N14)', '=SUM(O9:O14)', '=SUM(P9:P14)', '=SUM(Q9:Q14)', '=SUM(R9:R14)',
@@ -634,8 +674,8 @@ def item_build_sheets():
                             'sheetId': build_sheet_id,
                             'startRowIndex': 0,
                             'endRowIndex': 6,
-                            'startColumnIndex': 1,
-                            'endColumnIndex': 2
+                            'startColumnIndex': 0,
+                            'endColumnIndex': 1
                         },
                         'rule': {
                             'condition': {
@@ -655,6 +695,69 @@ def item_build_sheets():
             # Update sheet with drop down list
             status = push_to_sheets(request=drop_down,
                                     type_of_request=0)
+
+            if status == 'pass':
+
+                resize = {
+                    'requests': [
+                        {
+                            'autoResizeDimensions': {
+                                'dimensions': {
+                                    'sheetId': build_sheet_id,
+                                    'dimension': 'COLUMNS',
+                                    'startIndex': 0,
+                                    'endIndex': 29
+                                }
+                            }
+                        },
+                        {
+                            'updateDimensionProperties': {
+                                'range': {
+                                    'sheetId': build_sheet_id,
+                                    'dimension': 'COLUMNS',
+                                    'startIndex': 0,
+                                    'endIndex': 1
+                                },
+                                'properties': {
+                                    'pixelSize': 148
+                                },
+                                'fields': 'pixelSize'
+                            }
+                        },
+                        {
+                            'updateDimensionProperties': {
+                                'range': {
+                                    'sheetId': build_sheet_id,
+                                    'dimension': 'COLUMNS',
+                                    'startIndex': 4,
+                                    'endIndex': 5
+                                },
+                                'properties': {
+                                    'pixelSize': 39
+                                },
+                                'fields': 'pixelSize'
+                            }
+                        },
+                        {
+                            'updateDimensionProperties': {
+                                'range': {
+                                    'sheetId': build_sheet_id,
+                                    'dimension': 'COLUMNS',
+                                    'startIndex': 19,
+                                    'endIndex': 20
+                                },
+                                'properties': {
+                                    'pixelSize': 99
+                                },
+                                'fields': 'pixelSize'
+                            }
+                        }
+                    ]
+                }
+
+                # Resize the columns on the item build sheet
+                status = push_to_sheets(request=resize,
+                                        type_of_request=0)
 
         # If the Items page does not exist, create it
         if status == "newPage":
@@ -766,7 +869,7 @@ def get_item_info(item_name, cnt, finished_items_html, item_html):
                 info_box_section_name = info_box_section.contents[0].text.strip()
 
                 # Conduct appropriate parsing depending on current section name
-                if info_box_section_name == 'Stats':
+                if info_box_section_name == 'Stats':  # todo add item actives
                     current_info = get_stats(info_box_section_name=info_box_section,
                                              current_info=current_info)
                 elif info_box_section_name == 'Passive':
@@ -1000,8 +1103,8 @@ def get_item():
             log_status('\n')
 
             #FOR DEBUGGING, STOP AFTER FIRST SECTION
-            #break
-    # FOR DEBUGGING, CREATE LOCAL COPY AS GOLBAL VARIABLE DO NOT SHOW UP IN THE DEBUGGER
+            # break
+    # FOR DEBUGGING, CREATE LOCAL COPY AS GLOBAL VARIABLE DOES NOT SHOW UP IN THE DEBUGGER
     temp = item_info.copy()
     return
 
@@ -1014,8 +1117,8 @@ def main():
     get_patch()
 
     # Processes stat for each champion
-    champ_list = get_champ_stat_info()
-    champ_google_sheets(champ_list)
+    # champ_list = get_champ_stat_info()
+    # champ_google_sheets(champ_list)
 
     # Process all item information
     get_item()
