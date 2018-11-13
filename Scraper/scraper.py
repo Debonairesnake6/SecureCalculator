@@ -24,6 +24,7 @@ home_directory = ''  # Home directory of project
 mkdir_lock = threading.Lock()  # Lock for creating directories to store web pages
 counter_lock = threading.Lock()  # Lock for limiting the number of threads
 logging_lock = threading.Lock()  # Lock for logging the status of the program
+bs4_lock = threading.Lock()  # Lock for beautiful soup to reduce errors
 patch = ''  # Current patch version
 thread_count = 0  # Current thread count
 
@@ -120,7 +121,8 @@ def get_patch():
     main_url = http_pool.request(method='GET', url=home_url).data.decode('utf-8', 'ignore')
 
     # Parse page and look for patch version
-    patch_html = BeautifulSoup(markup=main_url, features='lxml')
+    with bs4_lock:
+        patch_html = BeautifulSoup(markup=main_url, features='lxml')
     current_patch_html = patch_html.find(id='navigation')
     patch = current_patch_html.contents[55].contents[2].text.split(' ', 1)[1]
 
@@ -151,7 +153,7 @@ def get_patch():
     os.chdir(path)
 
 
-def push_to_sheets(request, type_of_request, range_of_update="none", page_updating=""):
+def push_to_sheets(request=None, type_of_request=None, range_of_update=None, page_updating=""):
     """
     Put data collected onto spreadsheet for calculations
     :param request: data to be inserted on sheet
@@ -190,6 +192,12 @@ def push_to_sheets(request, type_of_request, range_of_update="none", page_updati
                 body=request,
                 range=range_of_update,
                 valueInputOption="USER_ENTERED").execute()
+        # Read sheet for info
+        elif type_of_request == 2:
+            response = service.spreadsheets().get(
+                spreadsheetId=sheet_id
+            )
+            return response.execute()
 
     # Catch error on changes and print error message
     except HttpError as error:
@@ -234,7 +242,8 @@ def get_champ_stat_info():
     main_url = get_web_page(page_name='League_of_Legends_Wiki', http_pool=http_pool)
 
     # Parse the HTML page for champion names
-    champions_html = BeautifulSoup(markup=main_url, features='lxml')
+    with bs4_lock:
+        champions_html = BeautifulSoup(markup=main_url, features='lxml')
     champ_roster_ol = champions_html.find(class_="champion_roster")
     champ_roster_li = champ_roster_ol.find_all('a')
 
@@ -256,7 +265,8 @@ def get_champ_stat_info():
         main_url = get_web_page(page_name=champ[6:].replace('%27', '\'').replace('_', ' '),
                                 path='/Champions/',
                                 http_pool=http_pool)
-        champions_html = BeautifulSoup(markup=main_url, features='lxml')
+        with bs4_lock:
+            champions_html = BeautifulSoup(markup=main_url, features='lxml')
 
         # Append stats to array
         for stat in stat_type:
@@ -425,8 +435,10 @@ def item_google_sheets():
     global item_info
     all_item_info = item_info.copy()
 
+    # Array to hold each item update for the spreadsheet
     all_item_rows = []
 
+    # Parse through the entire item dictionary
     for category in all_item_info:
         for item in all_item_info[category]:
             # Dictionary to hold info for the current item row
@@ -462,36 +474,65 @@ def item_google_sheets():
                 ''  # 28 cost
             ]
 
+            # Set the name for the current item
             item_row[0] = item
 
+            # Loop through all of the stats for the current item
             for info in all_item_info[category][item]:
+
+                # Set value if current stat is cost, as it is not a nested dictionary
                 if info == 'cost':
                     array_position = item_switch_case(info)
                     item_row[array_position] = all_item_info[category][item][info]
+
+                # Loop through the current type of stat to add each value
                 else:
                     for info_section in all_item_info[category][item][info]:
+
+                        # Find the correct position to enter the current stat into the array
                         array_position = item_switch_case(info_section)
+
+                        # Add the current stat into the array for the current item
                         try:
-                            item_row[array_position] = all_item_info[category][item][info][info_section].replace('+', '')
+                            item_row[array_position] = all_item_info[category][item][info][info_section].replace('+',
+                                                                                                                 '')
 
                         # If the stat is not being used by the calculator then skip (e.g. lifesteal vs monsters)
                         except TypeError:
                             pass
 
+                # Add the item category to the array
+                item_row[19] = category
+
+                # If map section does not have yes/no, it is available on all maps
+                if item_row[20] == '':
+                    item_row[20] = 'yes'
+                    item_row[21] = 'yes'
+                    item_row[22] = 'yes'
+                    item_row[23] = 'yes'
+
+            # Append the current item to the array holding all items
             all_item_rows.append(item_row)
+
+    # Sort the item array by name
     all_item_rows = sorted(all_item_rows)
 
+    # Create the request dictionary to insert into google sheets
     request = {
         'values': all_item_rows
     }
 
+    # Try to insert data into google sheets until it succeeds
     status = ''
     while status != 'pass':
+
+        # Update the item info on the Items page
         status = push_to_sheets(request=request,
                                 type_of_request=1,
                                 range_of_update=''.join(['Items', '!A2:AC', str(len(all_item_rows) + 1)]),
                                 page_updating='Items')
 
+        # If the Items page does not exist, create it
         if status == "newPage":
             new_page = {
                 "requests": {
@@ -502,21 +543,149 @@ def item_google_sheets():
                     }
                 }
             }
-            # Create new page for the current champion
+
+            # Create new page for the Items
             push_to_sheets(request=new_page,
                            type_of_request=0)
 
+            # Dictionary to hold the titles for the Items page
             titles = {
-                'values': [['name', 'ability power', 'armor', 'attack damage', 'attack speed', 'base health regeneration',
-                            'base mana regeneration', 'bonus health', 'cooldown reduction', 'critical strike chance',
-                            'gold per 10 seconds', 'health', 'health on-hit', 'life steal', 'magic penetration',
-                            'magic resistance', 'mana', 'movement speed', 'spell vamp', 'category', 'SR', 'TT', 'HA', 'NB',
-                            'Passive 1', 'Passive 2', 'Passive 3', 'Passive 4', 'cost']]
+                'values': [['name', 'ability power', 'armor', 'attack damage', 'attack speed',
+                            'base health regeneration', 'base mana regeneration', 'bonus health', 'cooldown reduction',
+                            'critical strike chance', 'gold per 10 seconds', 'health', 'health on-hit', 'life steal',
+                            'magic penetration', 'magic resistance', 'mana', 'movement speed', 'spell vamp', 'category',
+                            'SR', 'TT', 'HA', 'NB', 'Passive 1', 'Passive 2', 'Passive 3', 'Passive 4', 'cost']]
             }
+
+            # Update titles on the Items page
             push_to_sheets(request=titles,
                            type_of_request=1,
                            range_of_update='Items!A1:AC1',
                            page_updating='Items')
+
+    return
+
+
+def item_build_sheets():
+    """
+    Create sheet for item builds
+    :return:
+    """
+
+    # Name of item build sheet and it's numbered ID
+    sheet_name = 'Item Build'
+    build_sheet_id = ''
+
+    # Initial dictionary to update static values on the sheet
+    request = {
+        'values': [
+            ['Item 1', '', '', 'Instructions:'],
+            ['Item 2', '', '', 'Enter item into the B1-B6 slots and the items totals will automatically update'],
+            ['Item 3'],
+            ['Item 4'],
+            ['Item 5'],
+            ['Item 6'],
+            [],
+            ['name', 'ability power', 'armor', 'attack damage', 'attack speed', 'base health regeneration',
+             'base mana regeneration', 'bonus health', 'cooldown reduction', 'critical strike chance',
+             'gold per 10 seconds', 'health', 'health on-hit', 'life steal', 'magic penetration', 'magic resistance',
+             'mana', 'movement speed', 'spell vamp', 'category', 'SR', 'TT', 'HA', 'NB', 'Passive 1', 'Passive 2',
+             'Passive 3', 'Passive 4', 'cost'],
+            ['=FILTER(Items!$A$2:$AC$200, Items!$A$2:$A$200 = B1)'],
+            ['=FILTER(Items!$A$2:$AC$200, Items!$A$2:$A$200 = B2)'],
+            ['=FILTER(Items!$A$2:$AC$200, Items!$A$2:$A$200 = B3)'],
+            ['=FILTER(Items!$A$2:$AC$200, Items!$A$2:$A$200 = B4)'],
+            ['=FILTER(Items!$A$2:$AC$200, Items!$A$2:$A$200 = B5)'],
+            ['=FILTER(Items!$A$2:$AC$200, Items!$A$2:$A$200 = B6)'],
+            ['Total', '=SUM(B9:B14)', '=SUM(C9:C14)', '=SUM(D9:D14)', '=SUM(E9:E14)', '=SUM(F9:F14)',
+             '=SUM(G9:G14)', '=SUM(H9:H14)', '=SUM(I9:I14)', '=SUM(J9:J14)', '=SUM(K9:K14)', '=SUM(L9:L14)',
+             '=SUM(M9:M14)', '=SUM(N9:N14)', '=SUM(O9:O14)', '=SUM(P9:P14)', '=SUM(Q9:Q14)', '=SUM(R9:R14)',
+             '=SUM(S9:S14)', '', '', '', '', '', '', '', '', '', '=SUM(AC9:AC14)']
+        ]
+    }
+
+    # Try to insert data into google sheets until it succeeds
+    status = ''
+    while status != 'pass':
+
+        # Update the item info on the Item Build page
+        status = push_to_sheets(request=request,
+                                type_of_request=1,
+                                range_of_update=''.join([sheet_name, '!A1:AC15']),
+                                page_updating=sheet_name)
+
+        # Create the item selection list on the Item Build page
+        if status == 'pass':
+
+            # Get sheet numerical sheet ID
+            item_build_id = push_to_sheets(type_of_request=2)
+            if item_build_id != 'pass' or \
+                    item_build_id != 'newPage':
+                for sheet in item_build_id.get('sheets'):
+                    if sheet['properties'].get('title') == sheet_name:
+                        build_sheet_id = sheet['properties'].get('sheetId')
+                        continue
+
+            # Dictionary to add drop down menu on sheet
+            drop_down = {
+                'requests': [{
+                    'setDataValidation': {
+                        'range': {
+                            'sheetId': build_sheet_id,
+                            'startRowIndex': 0,
+                            'endRowIndex': 6,
+                            'startColumnIndex': 1,
+                            'endColumnIndex': 2
+                        },
+                        'rule': {
+                            'condition': {
+                                'type': 'ONE_OF_RANGE',
+                                'values': [{
+                                    'userEnteredValue': '=Items!A2:A200'
+                                }],
+                            },
+                            'strict': 'true',
+                            'showCustomUi': 'true',
+                            'inputMessage': 'Select an item'
+                        }
+                    }
+                }]
+            }
+
+            # Update sheet with drop down list
+            status = push_to_sheets(request=drop_down,
+                                    type_of_request=0)
+
+        # If the Items page does not exist, create it
+        if status == "newPage":
+            new_page = {
+                "requests": {
+                    "addSheet": {
+                        "properties": {
+                            "title": sheet_name
+                        }
+                    }
+                }
+            }
+
+            # Create new page for the Items
+            push_to_sheets(request=new_page,
+                           type_of_request=0)
+
+            # Dictionary to hold the titles for the Items page
+            titles = {
+                'values': [['name', 'ability power', 'armor', 'attack damage', 'attack speed',
+                            'base health regeneration', 'base mana regeneration', 'bonus health', 'cooldown reduction',
+                            'critical strike chance', 'gold per 10 seconds', 'health', 'health on-hit', 'life steal',
+                            'magic penetration', 'magic resistance', 'mana', 'movement speed', 'spell vamp', 'category',
+                            'SR', 'TT', 'HA', 'NB', 'Passive 1', 'Passive 2', 'Passive 3', 'Passive 4', 'cost']]
+            }
+
+            # Update titles on the Items page
+            push_to_sheets(request=titles,
+                           type_of_request=1,
+                           range_of_update=''.join([sheet_name, '!A8:AC8']),
+                           page_updating=sheet_name)
 
     return
 
@@ -545,7 +714,8 @@ def get_item_page(item, cnt, finished_items_html, category, http_pool):
                                   http_pool=http_pool)
 
     # Parse current item html page and process the information
-    item_html = BeautifulSoup(item_grid_html, 'lxml')
+    with bs4_lock:
+        item_html = BeautifulSoup(item_grid_html, 'lxml')
     get_item_info(item_name=item_name,
                   cnt=cnt,
                   finished_items_html=finished_items_html,
@@ -751,7 +921,8 @@ def get_item():
     log_status('\n')
 
     # Use the item page and set up parsing
-    item_grid_html = BeautifulSoup(markup=main_url, features='lxml')
+    with bs4_lock:
+        item_grid_html = BeautifulSoup(markup=main_url, features='lxml')
 
     # Find the item grid and start to parse
     finished_items_html = item_grid_html.find(id='item-grid')
@@ -843,12 +1014,13 @@ def main():
     get_patch()
 
     # Processes stat for each champion
-    # champ_list = get_champ_stat_info()
-    # champ_google_sheets(champ_list)
+    champ_list = get_champ_stat_info()
+    champ_google_sheets(champ_list)
 
     # Process all item information
     get_item()
     item_google_sheets()
+    item_build_sheets()
 
     # End time of program
     end_time = time.time()
