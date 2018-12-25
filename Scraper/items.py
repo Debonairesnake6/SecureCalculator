@@ -1,4 +1,3 @@
-# from .scraper import push_to_sheets, get_web_page, log_status
 import os  # Detect if file directory for patch exists
 import threading  # Used for threading items
 import time  # Timer to test speed of program
@@ -6,8 +5,8 @@ import time  # Timer to test speed of program
 import urllib3  # Obtain web pages for downloading and parsing
 from bs4 import BeautifulSoup  # Parse html page
 
-import Scraper.globals
-import Scraper.tools
+import Scraper.globals as my_globals
+import Scraper.tools as my_tools
 
 
 def item_switch_case(column):
@@ -61,7 +60,7 @@ def item_google_sheets():
     """
 
     # Create local copy of item dict for speed purposes
-    all_item_info = Scraper.globals.item_info.copy()
+    all_item_info = my_globals.item_info.copy()
 
     # Array to hold each item update for the spreadsheet
     all_item_rows = []
@@ -155,15 +154,15 @@ def item_google_sheets():
     while status != 'pass':
 
         # Update the item info on the Items page
-        status = Scraper.tools.push_to_sheets(request=request,
-                                              type_of_request=1,
-                                              range_of_update=''.join(['Items!A2:AC', str(len(all_item_rows) + 1)]),
-                                              page_updating='Items')
+        status = my_tools.push_to_sheets(request=request,
+                                         type_of_request=1,
+                                         range_of_update=''.join(['Items!A2:AC', str(len(all_item_rows) + 1)]),
+                                         page_updating='Items')
 
         if status == 'pass':
 
             # Get sheet numerical sheet ID
-            item_build_id = Scraper.tools.push_to_sheets(type_of_request=2)
+            item_build_id = my_tools.push_to_sheets(type_of_request=2)
             item_sheet_id = ''
             if item_build_id != 'pass' or \
                     item_build_id != 'newPage':
@@ -201,8 +200,8 @@ def item_google_sheets():
                 ]
             }
 
-            status = Scraper.tools.push_to_sheets(request=resize,
-                                                  type_of_request=0)
+            status = my_tools.push_to_sheets(request=resize,
+                                             type_of_request=0)
 
             # If the Items page does not exist, create it
         if status == "newPage":
@@ -217,8 +216,8 @@ def item_google_sheets():
             }
 
             # Create new page for the Items
-            Scraper.tools.push_to_sheets(request=new_page,
-                                         type_of_request=0)
+            my_tools.push_to_sheets(request=new_page,
+                                    type_of_request=0)
 
             # Dictionary to hold the titles for the Items page
             titles = {
@@ -228,10 +227,10 @@ def item_google_sheets():
             }
 
             # Update titles on the Items page
-            Scraper.tools.push_to_sheets(request=titles,
-                                         type_of_request=1,
-                                         range_of_update='Items!A1:AC1',
-                                         page_updating='Items')
+            my_tools.push_to_sheets(request=titles,
+                                    type_of_request=1,
+                                    range_of_update='Items!A1:AC1',
+                                    page_updating='Items')
 
     return
 
@@ -252,13 +251,13 @@ def get_item_page(item, cnt, finished_items_html, category, http_pool):
     saved_item_name = item_name[6:].replace('%27', '\'').replace('_', ' ')
 
     # Retrieve the html page for the current item
-    item_grid_html = Scraper.tools.get_web_page(page_name=saved_item_name,
-                                                path='/Items/',
-                                                sub_path=category,
-                                                http_pool=http_pool)
+    item_grid_html = my_tools.get_web_page(page_name=saved_item_name,
+                                           path='/Items/',
+                                           sub_path=category,
+                                           http_pool=http_pool)
 
     # Parse current item html page and process the information
-    with Scraper.globals.bs4_lock:
+    with my_globals.bs4_lock:
         item_html = BeautifulSoup(item_grid_html, 'lxml')
     get_item_info(item_name=item_name,
                   cnt=cnt,
@@ -266,8 +265,8 @@ def get_item_page(item, cnt, finished_items_html, category, http_pool):
                   item_html=item_html)
 
     # Signal current thread is done processing
-    with Scraper.globals.counter_lock:
-        Scraper.globals.thread_count -= 1
+    with my_globals.counter_lock:
+        my_globals.thread_count -= 1
 
 
 def get_item_info(item_name, cnt, finished_items_html, item_html):
@@ -330,8 +329,8 @@ def get_item_info(item_name, cnt, finished_items_html, item_html):
         return
 
     # Log status of job complete and add local dictionary to global dictionary
-    Scraper.tools.log_status(''.join(['Item completed: ', name]))
-    Scraper.globals.item_info[item_section][name] = current_info
+    my_tools.log_status(''.join(['Item completed: ', name]))
+    my_globals.item_info[item_section][name] = current_info
     return
 
 
@@ -350,7 +349,7 @@ def get_stats(info_box_section_name, current_info):
     try:
         for part, item in enumerate(info_box_section_name):
             # Skip filler from HTML page
-            if part % 2 == 1: # and part != 0:
+            if part % 2 == 1:  # and part != 0:
                 # Check if stat is being added (will raise error if otherwise and will then be skipped)
                 if item.text.strip()[0] == "+":
                     # Get number value for current stat being added
@@ -386,7 +385,7 @@ def get_passive(info_box_section_name, current_info):
     try:
         for part, item in enumerate(info_box_section_name):
             # Skip through filler from HTML page
-            if part % 2 == 1: # and part != 0:
+            if part % 2 == 1:  # and part != 0:
                 passive = item.text.strip()
 
                 if passive == 'Passive':
@@ -451,20 +450,20 @@ def get_item(home_directory):
     """
 
     # Log current status of program
-    Scraper.tools.log_status('Getting Item Grid')
+    my_tools.log_status('Getting Item Grid')
 
     # Change directory to HTML pages
     os.chdir(''.join([home_directory, '/HTML Pages']))
 
     # Create urllib3 pool to download each web page
     http_pool = urllib3.PoolManager()
-    main_url = Scraper.tools.get_web_page(page_name='Item', path='/Items', http_pool=http_pool)
+    main_url = my_tools.get_web_page(page_name='Item', path='/Items', http_pool=http_pool)
 
     # For formatting
-    Scraper.tools.log_status('\n')
+    my_tools.log_status('\n')
 
     # Use the item page and set up parsing
-    with Scraper.globals.bs4_lock:
+    with my_globals.bs4_lock:
         item_grid_html = BeautifulSoup(markup=main_url, features='lxml')
 
     # Find the item grid and start to parse
@@ -486,10 +485,10 @@ def get_item(home_directory):
                 continue
 
             # Log status of program
-            Scraper.tools.log_status(''.join(['Starting Section: ', finished_items_html.contents[cnt].text.strip()]))
+            my_tools.log_status(''.join(['Starting Section: ', finished_items_html.contents[cnt].text.strip()]))
 
             # Create entry for current section in global dictionary
-            Scraper.globals.item_info[finished_items_html.contents[cnt].text.strip()] = {}
+            my_globals.item_info[finished_items_html.contents[cnt].text.strip()] = {}
 
         # Search though section for items
         if cnt % 4 == 3:
@@ -515,10 +514,10 @@ def get_item(home_directory):
                 # Create thread for each item being parsed
                 while True:
                     # Only create a thread if limit has not been exceeded
-                    if Scraper.globals.thread_count < len(finished_items_html) / 2:
+                    if my_globals.thread_count < my_globals.thread_max:
                         # Signal a new thread is being created
-                        with Scraper.globals.counter_lock:
-                            Scraper.globals.thread_count += 1
+                        with my_globals.counter_lock:
+                            my_globals.thread_count += 1
 
                         # Create thread and process each item
                         thread = threading.Thread(target=get_item_page,
@@ -541,12 +540,12 @@ def get_item(home_directory):
                 thread.join()
 
             # For formatting
-            Scraper.tools.log_status('\n')
+                my_tools.log_status('\n')
 
             #FOR DEBUGGING, STOP AFTER FIRST SECTION
             # break
     #FOR DEBUGGING, CREATE LOCAL COPY AS GLOBAL VARIABLE DOES NOT SHOW UP IN THE DEBUGGER
-    temp = Scraper.globals.item_info.copy()
+    temp = my_globals.item_info.copy()
     return
 
 

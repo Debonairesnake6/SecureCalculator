@@ -11,7 +11,7 @@ from oauth2client import file, client, tools  # Used for authentication with API
 import Scraper.globals as my_globals
 
 
-def get_web_page(page_name, path='', sub_path='', http_pool=None):
+def get_web_page(page_name, path='', sub_path='', http_pool=None, browser=None):
     """
     Either fetch page from saved pages or get it from the wiki
     :return: contents of the web page
@@ -29,7 +29,7 @@ def get_web_page(page_name, path='', sub_path='', http_pool=None):
             except OSError:
                 log_error(''.join(['Failed to create directory for path: ', folder_path]))
 
-    # Try to open downloaded Item page
+    # Try to open downloaded page
     try:
         # Check the file size and raise not found error if the page was not downloaded correctly
         if os.stat(file_path).st_size == 0:
@@ -47,19 +47,28 @@ def get_web_page(page_name, path='', sub_path='', http_pool=None):
         # Log status of current page being downloaded
         log_status(''.join(['Downloading HTML page for: ', page_name]))
 
-        # Create/close item page html file
-        with open(file=file_path, mode='w', encoding='utf-8') as web_page:
-            web_url = ''.join(['http://leagueoflegends.wikia.com/wiki/', page_name.replace(' ', '_')])
+        if browser is None:
+            # Create/close item page html file
+            with open(file=file_path, mode='w', encoding='utf-8') as web_page:
+                web_url = ''.join(['http://leagueoflegends.wikia.com/wiki/', page_name.replace(' ', '_')])
 
-            # Use urllib3 pool for speed and built in threading handling
-            response = http_pool.request(method='GET', url=web_url)
+                # Use urllib3 pool for speed and built in threading handling
+                response = http_pool.request(method='GET', url=web_url)
 
-            # Ignore characters that are not in utf-8 as they are not needed
-            web_page.write(response.data.decode('utf-8', 'ignore'))
+                # Ignore characters that are not in utf-8 as they are not needed
+                web_page.write(response.data.decode('utf-8', 'ignore'))
 
-        # Open and read newly created file
-        with open(file=file_path, mode='r', encoding='utf-8') as web_page:
-            main_url = web_page.read()
+            # Open and read newly created file
+            with open(file=file_path, mode='r', encoding='utf-8') as web_page:
+                main_url = web_page.read()
+
+        else:
+            with open(file=file_path, mode='w', encoding='utf-8') as web_page:
+                browser.get(''.join(['http://leagueoflegends.wikia.com/wiki/', page_name]))
+                web_page.write(browser.page_source)
+
+            with open(file=file_path, mode='r', encoding='utf-8') as web_page:
+                main_url = web_page.read()
 
         return main_url
 
